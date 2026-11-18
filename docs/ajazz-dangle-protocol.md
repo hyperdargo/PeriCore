@@ -102,6 +102,10 @@ Let r be the result after normal report-ID removal:
 
 **CONFIRMED interval:** watch loop `0x0044FAE1–0x004506E7` polls common status through future `0x005732C0` / vtable `0x008E5EF0`, compares old/new states and logs `dangle status ====>>>>` at `0x0045038F`. It then constructs a **2-second sleep** at `0x0045065A–0x00450669` (seconds 2, nanoseconds 0). There is also a 2-second backoff at `0x0044F92F–0x0044F93B`. Transaction/retry time adds to the start-to-start interval.
 
+## Hardware check (2026-11-18)
+
+**VERIFIED ON DEVICE:** AJ159/AJ179 APEX via receiver `3151:5007`. A 65-byte send of `00 F7 00…` (NONE checksum) followed by a 65-byte get-feature returned `00 00 59 01 01 01 02 00 …`. Byte r[2] = `0x59` = 89 matched the AJAZZ Driver's own battery display (89%). Earlier readings were 0x5B and 0x5A as the battery drained. r[0] stayed 0 throughout. The 67-byte send is not required.
+
 ## Concrete mouse-battery request
 
 **CONFIRMED:** query the receiver with F7 and read mouse battery from logical r[2] (feature buffer offset 3). This query returns both batteries and does not require a preceding mouse-target selection.
@@ -139,3 +143,15 @@ Get-feature separately uses 65 zero bytes initially (report ID 0), returning the
 ## Outstanding boundaries
 
 Further tracing is needed for the complete gRPC NONE/read dispatch variants, r[6] firmware enum, charging information and exhaustive open traffic. Physical handling of the overlength send remains unverified. No USB capture was obtained or device traffic generated. Core checksum, F6 routing, F7 request/battery offsets, report-ID handling and two-second watch delay have direct static evidence.
+
+## Routed mouse commands (verified 2026-11-18)
+
+Verified on hardware: GET `D3`/`D4` and SET `54` reach an AJ159/AJ179 APEX through receiver `3151:5007`. All frames are 65-byte feature reports with report ID 0.
+
+1. Poll `F7` (NONE checksum) every 100 ms until **r[4] == 0** (mouse online/awake) **and r[5] == 1** (write finished). r[0] is *not* the gate.
+2. Send `F6 05` (NONE) to select the mouse, then wait 10 ms.
+3. Send the command with BIT7, for example `D3 00 00 00 00 00 00 2C`.
+4. For a GET: poll `F7` with the same gate again, wait 10 ms, send `FC` (NONE), then get-feature. The reply starts with the command echo (`D3 …`).
+   For a SET: poll `F7` until the write finishes.
+
+A sleeping mouse reports r[4] = 1. Moving it wakes it within a second or two.

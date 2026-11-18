@@ -322,6 +322,13 @@ pub fn parse_battery(reply: &[u8]) -> Option<BatteryInfo> {
 /// Parses the receiver status reply to F7 (docs/ajazz-dangle-protocol.md):
 /// r[1] = keyboard battery, r[2] = mouse battery. The receiver doesn't report
 /// charging here, so state is always Discharging.
+/// Whether the receiver can pass a command to / reply from the paired mouse:
+/// r[4]==0 means the mouse is online (awake), r[5]==1 means the last write
+/// finished. Both gates come from the vendor helper's status decoder.
+pub fn receiver_mouse_ready(status: &[u8]) -> bool {
+    status.get(4) == Some(&0) && status.get(5) == Some(&1)
+}
+
 pub fn parse_receiver_status(reply: &[u8], mouse: bool) -> Option<BatteryInfo> {
     let level = *reply.get(if mouse { 2 } else { 1 })?;
     (1..=100)
@@ -339,6 +346,15 @@ pub fn parse_dangle_id(reply: &[u8]) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn receiver_gate_matches_captured_statuses() {
+        // Captured on hardware: asleep vs awake mouse.
+        assert!(!receiver_mouse_ready(&[0x00, 0x00, 0x58, 0x01, 0x01, 0x01, 0x02]));
+        assert!(receiver_mouse_ready(&[0x01, 0x00, 0x58, 0x01, 0x00, 0x01, 0x02]));
+        assert!(!receiver_mouse_ready(&[0x01, 0x00, 0x58, 0x01, 0x00, 0x00, 0x02]));
+        assert!(!receiver_mouse_ready(&[0x01]));
+    }
 
     #[test]
     fn rate_codes_roundtrip() {

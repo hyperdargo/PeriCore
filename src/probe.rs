@@ -55,8 +55,13 @@ fn probe_ry(api: &HidApi, d: &devices::Detected) {
         Err(e) => return println!("   open failed: {e:#}"),
     };
     println!("   identify: {:?}", dev.identify());
-    for (label, payload) in [("rev", vec![0x80u8]), ("battery", vec![0x82]), ("profile", vec![0x85])] {
-        match dev.raw_query(&payload) {
+    let probes: &[(&str, &[u8])] = if d.kind == devices::Kind::Receiver {
+        &[]
+    } else {
+        &[("rev", &[0x80]), ("battery", &[0x82]), ("profile", &[0x85])]
+    };
+    for &(label, payload) in probes {
+        match dev.raw_query(payload) {
             Ok(r) => println!("   {label:8} -> {}", hex(&r[..16])),
             Err(e) => println!("   {label:8} -> ERR {e:#}"),
         }
@@ -66,7 +71,9 @@ fn probe_ry(api: &HidApi, d: &devices::Detected) {
             Ok(b) => println!("   receiver battery -> {}% {:?}", b.percent, b.state),
             Err(e) => println!("   receiver battery -> ERR {e:#}"),
         }
-        return;
+        if !dev.is_mouse() {
+            return;
+        }
     }
     match dev.read_option0() {
         Ok(o) => println!("   option0  -> {}\n      rate={:?} debounce={} light={:?}", hex(&o.0), o.poll_rate(), o.debounce_ms(), o.lighting()),

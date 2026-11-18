@@ -11,6 +11,10 @@ use protocol::{cmd, BatteryInfo, MouseOption0, MouseOption1};
 /// RY mice store up to 8 onboard profiles.
 const MAX_PROFILES: u8 = 8;
 
+fn sleep_ms(ms: u64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms));
+}
+
 pub struct RyDevice {
     chan: RyChannel,
     pub info: Detected,
@@ -58,6 +62,53 @@ impl RyDevice {
         self.chan.query(payload, Checksum::Bit7)
     }
 
+    /// Polls receiver status until the paired mouse is awake and the
+    /// previous write finished (about 3 s max, enough to wake it by moving it).
+    fn wait_receiver(&self) -> Result<()> {
+        let mut last = [0u8; 8];
+        for _ in 0..30 {
+            sleep_ms(100);
+            let s = self.chan.query_as(&[cmd::RECEIVER_STATUS], Checksum::None, Target::Direct)?;
+            if protocol::receiver_mouse_ready(&s) {
+                sleep_ms(1);
+                return Ok(());
+            }
+            last.copy_from_slice(&s[..8]);
+        }
+        Err(anyhow!("mouse is asleep or out of range - move it and retry (status {:02x?})", &last[..7]))
+    }
+
+    /// Sends a mouse command through the receiver (F6 05 selects the mouse).
+    fn receiver_send(&self, payload: &[u8]) -> Result<()> {
+        self.wait_receiver()?;
+        self.chan.write_as(&[0xF6, 0x05], Checksum::None, Target::Direct)?;
+        sleep_ms(10);
+        self.chan.write_as(payload, Checksum::Bit7, Target::Direct)?;
+        sleep_ms(5);
+        Ok(())
+    }
+
+    /// GET: direct for wired mice; for receivers, send then fetch with FC.
+    fn query_cmd(&self, payload: &[u8]) -> Result<[u8; 64]> {
+        if self.info.kind != Kind::Receiver {
+            return self.chan.query(payload, Checksum::Bit7);
+        }
+        self.receiver_send(payload)?;
+        self.wait_receiver()?;
+        sleep_ms(10);
+        self.chan.write_as(&[0xFC], Checksum::None, Target::Direct)?;
+        self.chan.read()
+    }
+
+    /// SET: direct for wired mice; for receivers, send and wait until the
+    /// receiver reports the write finished.
+    fn write_cmd(&self, payload: &[u8]) -> Result<()> {
+        if self.info.kind != Kind::Receiver {
+            return self.chan.write(payload, Checksum::Bit7);
+        }
+        self.receiver_send(payload)?;
+        self.wait_receiver()
+    }
 
     pub fn battery(&self) -> Result<BatteryInfo> {
         if self.info.kind == Kind::Receiver {
@@ -70,7 +121,7 @@ impl RyDevice {
     }
 
     pub fn read_option0(&mut self) -> Result<MouseOption0> {
-        let reply = self.chan.query(&[cmd::MOUSE_GET_OPTION0], Checksum::Bit7)?;
+        let reply = self.query_cmd(&[cmd::MOUSE_GET_OPTION0])?;
         if reply[0] != cmd::MOUSE_GET_OPTION0 {
             return Err(anyhow!("option0: bad echo {:02x}", reply[0]));
         }
@@ -82,11 +133,11 @@ impl RyDevice {
     }
 
     pub fn write_option0(&self, o: &MouseOption0) -> Result<()> {
-        self.chan.write(&o.to_set_payload(), Checksum::Bit7)
+        self.write_cmd(&o.to_set_payload())
     }
 
     pub fn read_option1(&self) -> Result<MouseOption1> {
-        let reply = self.chan.query(&[cmd::MOUSE_GET_OPTION1, self.profile], Checksum::Bit7)?;
+        let reply = self.query_cmd(&[cmd::MOUSE_GET_OPTION1, self.profile])?;
         if reply[0] != cmd::MOUSE_GET_OPTION1 {
             return Err(anyhow!("option1: bad echo {:02x}", reply[0]));
         }
@@ -94,7 +145,7 @@ impl RyDevice {
     }
 
     pub fn write_option1(&self, o: &MouseOption1) -> Result<()> {
-        self.chan.write(&o.to_set_payload(self.profile), Checksum::Bit7)
+        self.write_cmd(&o.to_set_payload(self.profile))
     }
 
 }

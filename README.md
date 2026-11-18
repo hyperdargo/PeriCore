@@ -41,12 +41,12 @@ PeriCore is a **single 4.5 MB `.exe`** that:
 | Feature | 2.4G receiver | USB cable |
 |---|:-:|:-:|
 | Battery level | ✅ | – |
-| DPI stages (1–8), per-stage colours, active stage | ❌ not yet | ⚠️ untested |
-| Polling rate 125 – 8000 Hz | ❌ not yet | ⚠️ untested |
-| Debounce, lift-off distance, motion sync, angle snapping, power saving, sleep timer | ❌ not yet | ⚠️ untested |
-| Lighting (effect, brightness, speed, colour, rainbow) | ❌ not yet | ⚠️ untested |
+| DPI stages (1–8), per-stage colours, active stage | ✅ verified | ⚠️ untested |
+| Polling rate 125 – 8000 Hz | ✅ | ⚠️ untested |
+| Debounce, lift-off distance, motion sync, angle snapping, power saving, sleep timer | ✅ | ⚠️ untested |
+| Lighting (effect, brightness, speed, colour, rainbow) | ✅ | ⚠️ untested |
 
-Settings over the wireless receiver need one more piece of the receiver handshake that hasn't been decoded yet, so for now PeriCore shows battery only in wireless mode. The settings themselves are implemented, but they haven't been tested over the USB cable yet.
+Over the 2.4G receiver, all settings load from the mouse and DPI changes have been confirmed to save on an AJ159/AJ179 APEX. The other settings save the same way. The mouse has to be awake, so if PeriCore says it's asleep, move it and press Reload. Settings over the USB cable use the direct protocol and haven't been tested yet.
 
 ### Fantech MAXFIT61 keyboard
 - Firmware / model readout
@@ -86,7 +86,7 @@ From PowerShell, run a quoted path with `&`:
 
 | Device | USB ID | Protocol |
 |---|---|---|
-| Ajazz 2.4G receiver (AJ159 / AJ179 APEX and others) | `3151:5007` | RY feature reports, receiver status `F7` |
+| Ajazz 2.4G receiver (AJ159 / AJ179 APEX and others) | `3151:5007` | RY feature reports routed via `F6 05` → cmd → `F7` gate → `FC` fetch |
 | Ajazz mice over cable | `3151:4026` | RY feature reports |
 | Fantech MAXFIT61 (XS61BRGB firmware) | `0416:C345` | 64-byte interrupt reports on interface 2 |
 

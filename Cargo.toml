@@ -1,6 +1,6 @@
 [package]
 name = "pericore"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "PeriCore - one fast app for Ajazz mice and Fantech keyboards: settings + tray battery indicator"
 repository = "https://github.com/hyperdargo/PeriCore"

@@ -3,7 +3,6 @@
 use crate::devices::ry::protocol::{flag, LightEffect, Lighting, MouseOption0, MouseOption1, MAX_DPI_STAGES, POLL_RATES};
 use crate::devices::ry::protocol::ChargeState;
 use crate::devices::ry::RyDevice;
-use crate::devices::Kind;
 use eframe::egui;
 
 const DEFAULT_COLORS: [[u8; 3]; MAX_DPI_STAGES] = [
@@ -88,16 +87,6 @@ impl MousePanel {
             ChargeState::Discharging => format!("{}%", b.percent),
             s => format!("{}% ({s:?})", b.percent),
         });
-        if self.dev.info.kind == Kind::Receiver {
-            self.form = None;
-            self.loaded = None;
-            self.status = Some(Err(
-                "Wireless (2.4G) settings aren't supported yet - battery only. \
-                 Connect the mouse with its USB cable to change DPI, polling rate and lighting."
-                    .into(),
-            ));
-            return;
-        }
         let read = self.dev.read_option0().and_then(|o0| Ok((o0, self.dev.read_option1()?)));
         match read {
             Ok((o0, o1)) => {

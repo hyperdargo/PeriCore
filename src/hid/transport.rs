@@ -60,6 +60,17 @@ impl RyChannel {
         self.read_reply()
     }
 
+    /// Like `write`, but overrides the routing target for one request.
+    pub fn write_as(&self, payload: &[u8], checksum: Checksum, target: Target) -> Result<()> {
+        let frame = self.frame_for(payload, checksum, target)?;
+        self.io.send_feature(&frame)
+    }
+
+    /// Reads the pending feature report without sending anything first.
+    pub fn read(&self) -> Result<[u8; REPORT_LEN]> {
+        self.read_reply()
+    }
+
     pub fn frame(&self, payload: &[u8], checksum: Checksum) -> Result<Vec<u8>> {
         self.frame_for(payload, checksum, self.target)
     }
