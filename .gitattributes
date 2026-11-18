@@ -1,0 +1,6 @@
+*.rgba binary
+*.ico binary
+*.png binary
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
