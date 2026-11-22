@@ -19,6 +19,8 @@ pub struct SoundPanel {
     active: (Vec<String>, Vec<String>),
     dirty: bool,
     msg: Option<Result<String, String>>,
+    /// Name typed into "Save as preset".
+    new_name: String,
 }
 
 impl SoundPanel {
@@ -31,6 +33,7 @@ impl SoundPanel {
             active: (Vec::new(), Vec::new()),
             dirty: false,
             msg: None,
+            new_name: String::new(),
         }
         .with_active()
     }
@@ -71,9 +74,15 @@ impl SoundPanel {
     pub fn show(&mut self, ui: &mut egui::Ui) {
         super::header(ui, "Sound", "Presets for music, movies and games, and mic noise suppression - in every app.", None);
         self.engine_card(ui);
+        let before = (self.s.enabled, self.s.correction_on, self.s.bands);
+        let picked = self.presets_card(ui);
         self.mode_card(ui);
         self.correction_card(ui);
         self.mic_card(ui);
+        // A change by hand means the saved preset is no longer what's playing.
+        if !picked && before != (self.s.enabled, self.s.correction_on, self.s.bands) {
+            self.s.active_profile = None;
+        }
         super::status_line(ui, &self.msg);
 
         // Apply once a drag ends rather than on every slider step.
@@ -140,6 +149,64 @@ impl SoundPanel {
                 }
             }
         });
+    }
+
+    /// Saved presets; returns true when one was picked this frame.
+    fn presets_card(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut picked = None;
+        let mut delete = None;
+        theme::card(ui, "My presets", |ui| {
+            if self.s.profiles.is_empty() {
+                ui.label(RichText::new("Set things up below, then save them here as a preset. Saved presets can also be switched from the tray menu.").color(theme::MUTED));
+            }
+            ui.horizontal_wrapped(|ui| {
+                for p in &self.s.profiles {
+                    let on = self.s.active_profile.as_deref() == Some(p.name.as_str());
+                    let text = RichText::new(&p.name).size(15.0).color(if on { theme::TEXT } else { theme::MUTED });
+                    let btn = egui::Button::new(text)
+                        .fill(if on { theme::ACCENT2.linear_multiply(0.22) } else { theme::CARD })
+                        .stroke(egui::Stroke::new(1.0_f32, if on { theme::ACCENT2 } else { theme::BORDER }))
+                        .rounding(egui::Rounding::same(18.0))
+                        .min_size(egui::vec2(96.0, 32.0));
+                    let tip = match (p.enabled, p.correction) {
+                        (false, _) => "EQ off: the earphones' own sound",
+                        (true, true) => "Headphone correction + these band settings",
+                        (true, false) => "These band settings, no headphone correction",
+                    };
+                    if ui.add(btn).on_hover_text(tip).clicked() {
+                        picked = Some(p.name.clone());
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.new_name).hint_text("Preset name").desired_width(180.0));
+                let name = self.new_name.trim().to_string();
+                if ui.add_enabled(!name.is_empty(), egui::Button::new("Save current as preset")).clicked() {
+                    self.s.save_profile(&name);
+                    self.msg = Some(Ok(format!("Saved preset \"{name}\"")));
+                    self.new_name.clear();
+                    self.dirty = true;
+                }
+                if let Some(active) = self.s.active_profile.clone() {
+                    if ui.button(format!("Delete \"{active}\"")).clicked() {
+                        delete = Some(active);
+                    }
+                }
+            });
+        });
+        if let Some(name) = delete {
+            self.s.delete_profile(&name);
+            self.dirty = true;
+        }
+        match picked {
+            Some(name) => {
+                self.s.use_profile(&name);
+                self.dirty = true;
+                true
+            }
+            None => false,
+        }
     }
 
     fn mode_card(&mut self, ui: &mut egui::Ui) {

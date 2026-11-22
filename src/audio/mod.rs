@@ -3,6 +3,7 @@
 pub mod config;
 pub mod devices;
 pub mod eapo;
+pub mod response;
 
 use config::Sound;
 

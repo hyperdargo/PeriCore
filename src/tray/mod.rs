@@ -4,6 +4,7 @@ pub mod estimate;
 pub mod icon;
 pub mod monitor;
 mod promote;
+mod sound_menu;
 pub mod widget;
 
 use crate::os;
@@ -20,6 +21,7 @@ struct Items {
     refresh: MenuItem,
     taskbar: CheckMenuItem,
     autostart: CheckMenuItem,
+    sound: sound_menu::SoundMenu,
     quit: MenuItem,
 }
 
@@ -29,12 +31,14 @@ fn build_menu() -> Result<(Menu, Items)> {
         refresh: MenuItem::new("Refresh battery", true, None),
         taskbar: CheckMenuItem::new("Show battery on taskbar", true, taskbar_enabled(), None),
         autostart: CheckMenuItem::new("Start with Windows", true, os::autostart_enabled(), None),
+        sound: sound_menu::SoundMenu::new()?,
         quit: MenuItem::new("Quit", true, None),
     };
     let menu = Menu::new();
     menu.append_items(&[
         &items.open,
         &items.refresh,
+        &items.sound.submenu,
         &PredefinedMenuItem::separator(),
         &items.taskbar,
         &items.autostart,
@@ -138,7 +142,7 @@ pub fn run() -> Result<()> {
     let Some(_guard) = os::SingleInstance::acquire("PeriCore.Tray") else {
         return Ok(());
     };
-    let (menu, items) = build_menu()?;
+    let (menu, mut items) = build_menu()?;
     let mut icons = Icons { menu, shown: Vec::new() };
     // At login Explorer may not be ready yet: keep retrying for a minute.
     let first = retry(60, || icons.new_icon(IconState::default(), "PeriCore - reading battery..."))?;
@@ -163,6 +167,9 @@ pub fn run() -> Result<()> {
             }
         }
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
+            if items.sound.handle(&ev.id) {
+                continue;
+            }
             if ev.id == items.open.id() {
                 os::open_settings_window();
             } else if ev.id == items.refresh.id() {
@@ -212,6 +219,9 @@ pub fn run() -> Result<()> {
         if Instant::now() >= next_promote {
             next_promote = Instant::now() + Duration::from_secs(10);
             promote::promote();
+            if let Err(e) = items.sound.refresh() {
+                os::log_error(&format!("sound menu: {e:#}"));
+            }
         }
         if Instant::now() >= next_frame {
             next_frame = Instant::now() + ANIM_STEP;

@@ -88,7 +88,18 @@ pub struct Mic {
     pub plugin: Option<String>,
 }
 
+/// A saved preset: whether the EQ is on, whether the headphone correction
+/// is used, and the band gains added on top of it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Profile {
+    pub name: String,
+    pub enabled: bool,
+    pub correction: bool,
+    pub bands: [f32; 10],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Sound {
     pub enabled: bool,
     pub preset: Preset,
@@ -98,6 +109,45 @@ pub struct Sound {
     pub correction: Option<Correction>,
     pub correction_on: bool,
     pub mic: Mic,
+    /// Saved presets, switchable from the Sound page and the tray menu.
+    pub profiles: Vec<Profile>,
+    /// The saved preset in use, until a setting is changed by hand.
+    pub active_profile: Option<String>,
+}
+
+impl Sound {
+    /// Switches to a saved preset; false if there is none by that name.
+    pub fn use_profile(&mut self, name: &str) -> bool {
+        let Some(p) = self.profiles.iter().find(|p| p.name == name).cloned() else { return false };
+        self.enabled = p.enabled;
+        self.correction_on = p.correction;
+        self.bands = p.bands;
+        self.preset = Preset::Custom;
+        self.active_profile = Some(p.name);
+        true
+    }
+
+    /// Saves the current settings as a preset (replacing one of the same name).
+    pub fn save_profile(&mut self, name: &str) {
+        let p = Profile { name: name.to_string(), enabled: self.enabled, correction: self.correction_on, bands: self.bands };
+        match self.profiles.iter_mut().find(|q| q.name == name) {
+            Some(q) => *q = p,
+            None => self.profiles.push(p),
+        }
+        self.active_profile = Some(name.to_string());
+    }
+
+    pub fn delete_profile(&mut self, name: &str) {
+        self.profiles.retain(|p| p.name != name);
+        if self.active_profile.as_deref() == Some(name) {
+            self.active_profile = None;
+        }
+    }
+
+    /// Name shown for what's playing now.
+    pub fn label(&self) -> &str {
+        self.active_profile.as_deref().unwrap_or(self.preset.name())
+    }
 }
 
 impl Default for Sound {
@@ -110,6 +160,8 @@ impl Default for Sound {
             correction: None,
             correction_on: true,
             mic: Mic::default(),
+            profiles: Vec::new(),
+            active_profile: None,
         }
     }
 }
@@ -167,13 +219,12 @@ pub fn render(s: &Sound, all_outputs: &[Device]) -> String {
     let mut out = String::from("# Written by PeriCore. Change these settings in PeriCore; edits here are replaced.\n");
     let outputs = if s.outputs.is_empty() { all_outputs } else { &s.outputs };
     if s.enabled && !outputs.is_empty() {
-        out += &format!("\n# Sound: {}\n{}\n", s.preset.name(), device_line(outputs));
-        let boost = s.bands.iter().copied().fold(0.0_f32, f32::max);
-        let mut preamp = -boost;
+        out += &format!("\n# Sound: {}\n{}\n", s.label().replace('\n', " "), device_line(outputs));
         let correction = s.correction.as_ref().filter(|_| s.correction_on);
-        if let Some(c) = correction {
-            preamp += c.preamp;
-        }
+        let filters = correction.map_or(&[][..], |c| c.filters.as_slice());
+        // Lower the level by the highest boost of correction + bands combined.
+        let peak = super::response::peak_db(filters, &s.bands);
+        let preamp = -((peak * 10.0).ceil() / 10.0) as f32;
         if preamp < 0.0 {
             out += &format!("Preamp: {} dB\n", fmt(preamp));
         }
@@ -252,7 +303,9 @@ mod tests {
         };
         let t = render(&s, &[dev("{a}")]);
         assert!(t.contains("Device: {h}\n"));
-        assert!(t.contains("Preamp: -8.4 dB"));
+        let peak = crate::audio::response::peak_db(&s.correction.as_ref().unwrap().filters, &s.bands);
+        assert!(t.contains(&format!("Preamp: -{:.1} dB", (peak * 10.0).ceil() / 10.0)), "{t}");
+        assert!(peak > 7.0, "{peak}");
         assert!(t.contains("Filter: ON LSC Fc 105 Hz"));
     }
 
@@ -267,6 +320,30 @@ mod tests {
         let t = render(&s, &[dev("{a}")]);
         assert!(!t.contains("GraphicEQ"));
         assert!(t.contains("Device: {m}\nVSTPlugin: Library \"C:\\p\\rnnoise.dll\""));
+    }
+
+    #[test]
+    fn saved_profiles_switch_everything() {
+        let mut s = Sound { correction: Some(parse_correction("c", AUTOEQ).unwrap()), ..Sound::default() };
+        s.bands = [1.0; 10];
+        s.save_profile("Games");
+        s.enabled = false;
+        s.correction_on = false;
+        s.save_profile("Default");
+        assert!(s.use_profile("Games"));
+        assert!(s.enabled && s.correction_on && s.bands == [1.0; 10]);
+        assert_eq!(s.label(), "Games");
+        assert!(!s.use_profile("Nope"));
+        s.delete_profile("Games");
+        assert_eq!(s.active_profile, None);
+        assert_eq!(s.profiles.len(), 1);
+    }
+
+    #[test]
+    fn old_settings_files_still_load() {
+        let old = r#"{"enabled":true,"preset":"Games","bands":[0,0,0,0,0,0,0,0,0,0],"outputs":[],"correction":null,"correction_on":true,"mic":{"enabled":false,"device":null,"plugin":null}}"#;
+        let s: Sound = serde_json::from_str(old).unwrap();
+        assert!(s.profiles.is_empty() && s.active_profile.is_none());
     }
 
     #[test]

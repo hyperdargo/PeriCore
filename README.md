@@ -81,6 +81,8 @@ The receiver doesn't report charging, so the charging state only shows for wired
 - **Headphone correction:** import the AutoEQ `ParametricEQ.txt` for your exact IEM or headphones (from [autoeq.app](https://autoeq.app)) so it sounds neutral before the sound mode is applied.
 - **Mic noise suppression:** removes keyboard, fan and background noise from your microphone in every app (Discord, games, calls), using the free [RNNoise plugin](https://github.com/werman/noise-suppression-for-voice).
 - Pick which output and which microphone it applies to.
+- **Saved presets:** save any setup (EQ on/off, correction on/off, bands) under your own name, then switch from the Sound page, the tray menu (**Sound preset**), or a shortcut or hotkey running `PeriCore.exe --sound "Preset name"`.
+- The preamp is worked out from the combined response of the correction and the bands, so the loudest point stays at 0 dB and boosts never clip.
 
 Windows only lets an app change other apps' sound through an audio add-on, so this uses the free [Equalizer APO](https://sourceforge.net/projects/equalizerapo/). Install it once, tick your headphones and microphone in its Device Selector, restart, then press **Connect** on PeriCore's Sound page (your previous Equalizer APO settings are backed up to `config-before-pericore.txt`). RNNoise needs the mic set to 48 kHz.
 
@@ -109,6 +111,7 @@ Prefer no installer? Each release also has a portable **`PeriCore.exe`**: put it
 | `PeriCore.exe --probe` | Prints detected devices and read-only diagnostics |
 | `PeriCore.exe --listen 3151 5007 10` | Passively prints a device's vendor input reports for 10 s |
 | `PeriCore.exe --dock-upload picture.gif` | Uploads a picture to the dock screen from the command line |
+| `PeriCore.exe --sound "Preset name"` | Switches to a saved sound preset (for shortcuts and hotkeys) |
 | `PeriCore.exe --uninstall` | Removes an installed PeriCore (what *Uninstall* in Windows runs) |
 
 From PowerShell, run a quoted path with `&`:

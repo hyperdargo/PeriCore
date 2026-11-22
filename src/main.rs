@@ -43,6 +43,19 @@ fn run_mode(arg: &str) -> anyhow::Result<()> {
         }
         "--tray" => tray::run(),
         "--uninstall" => uninstall::run(std::env::args().any(|a| a == "--quiet")),
+        // `--sound "Preset name"`: switch to a saved sound preset (for shortcuts/hotkeys).
+        "--sound" => {
+            attach_console();
+            let name = std::env::args().nth(2).unwrap_or_default();
+            let mut s = audio::load();
+            if !s.use_profile(&name) {
+                let names: Vec<&str> = s.profiles.iter().map(|p| p.name.as_str()).collect();
+                anyhow::bail!("no saved sound preset \"{name}\" (saved: {})", names.join(", "));
+            }
+            audio::save_and_apply(&s)?;
+            println!("Sound preset: {name}");
+            Ok(())
+        }
         "--dock-upload" => {
             attach_console();
             probe::dock_upload(std::env::args().nth(2).unwrap_or_default().into())
