@@ -1,19 +1,23 @@
 //! System-tray process: battery icon + menu. Very small and always running.
 
+pub mod estimate;
 pub mod icon;
 pub mod monitor;
+pub mod widget;
 
 use crate::os;
 use anyhow::Result;
 use icon::IconState;
 use monitor::Reading;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 struct Items {
     open: MenuItem,
     refresh: MenuItem,
+    taskbar: CheckMenuItem,
     autostart: CheckMenuItem,
     quit: MenuItem,
 }
@@ -22,6 +26,7 @@ fn build_menu() -> Result<(Menu, Items)> {
     let items = Items {
         open: MenuItem::new("Open settings", true, None),
         refresh: MenuItem::new("Refresh battery", true, None),
+        taskbar: CheckMenuItem::new("Show battery on taskbar", true, taskbar_enabled(), None),
         autostart: CheckMenuItem::new("Start with Windows", true, os::autostart_enabled(), None),
         quit: MenuItem::new("Quit", true, None),
     };
@@ -30,6 +35,7 @@ fn build_menu() -> Result<(Menu, Items)> {
         &items.open,
         &items.refresh,
         &PredefinedMenuItem::separator(),
+        &items.taskbar,
         &items.autostart,
         &PredefinedMenuItem::separator(),
         &items.quit,
@@ -37,16 +43,81 @@ fn build_menu() -> Result<(Menu, Items)> {
     Ok((menu, items))
 }
 
+const TASKBAR_SETTING: &str = "taskbar-widget";
+
+/// The taskbar widget is off unless the user turned it on (the tray icon
+/// already shows the battery).
+fn taskbar_enabled() -> bool {
+    crate::store::load::<bool>(TASKBAR_SETTING).unwrap_or(false)
+}
+
 fn make_icon(state: IconState) -> Result<Icon> {
     Ok(Icon::from_rgba(icon::render(state), icon::SIZE as u32, icon::SIZE as u32)?)
 }
 
-fn primary_state(readings: &[Reading]) -> IconState {
-    readings
-        .iter()
-        .find(|r| r.percent.is_some())
-        .or(readings.first())
-        .map_or(IconState { percent: None, charging: false }, |r| IconState { percent: r.percent, charging: r.charging })
+fn state_of(r: &Reading, phase: u8) -> IconState {
+    let device = match r.kind {
+        crate::devices::Kind::Controller => icon::Device::Controller,
+        crate::devices::Kind::Mouse | crate::devices::Kind::Receiver => icon::Device::Mouse,
+        crate::devices::Kind::Keyboard => icon::Device::Unknown,
+    };
+    IconState { percent: r.percent, charging: r.charging(), full: r.full(), asleep: r.asleep, phase, device }
+}
+
+/// How often the charging animation advances.
+const ANIM_STEP: Duration = Duration::from_millis(600);
+
+/// One tray icon per device (or a single placeholder when none is found).
+struct Icons {
+    menu: Menu,
+    shown: Vec<(String, TrayIcon)>,
+}
+
+impl Icons {
+    fn new_icon(&self, state: IconState, tip: &str) -> Result<TrayIcon> {
+        Ok(TrayIconBuilder::new()
+            .with_menu(Box::new(self.menu.clone()))
+            .with_menu_on_left_click(false)
+            .with_tooltip(tip)
+            .with_icon(make_icon(state)?)
+            .build()?)
+    }
+
+    /// Makes the set of icons match `readings`, then redraws them.
+    fn sync(&mut self, readings: &[Reading], phase: u8) -> Result<()> {
+        let wanted: Vec<String> = if readings.is_empty() { vec![String::new()] } else { readings.iter().map(|r| r.key.clone()).collect() };
+        self.shown.retain(|(k, _)| wanted.contains(k));
+        for k in &wanted {
+            if !self.shown.iter().any(|(s, _)| s == k) {
+                let icon = self.new_icon(IconState::default(), "PeriCore")?;
+                self.shown.push((k.clone(), icon));
+            }
+        }
+        self.shown.sort_by_key(|(k, _)| wanted.iter().position(|w| w == k));
+        if readings.is_empty() {
+            let (_, t) = &self.shown[0];
+            t.set_icon(Some(make_icon(IconState::default())?))?;
+            t.set_tooltip(Some(monitor::tooltip(readings)))?;
+            return Ok(());
+        }
+        for r in readings {
+            if let Some((_, t)) = self.shown.iter().find(|(k, _)| *k == r.key) {
+                t.set_icon(Some(make_icon(state_of(r, phase))?))?;
+                t.set_tooltip(Some(format!("PeriCore - {}", monitor::line(r)).chars().take(127).collect::<String>()))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Advances only the charging icons (cheap; runs a few times a second).
+    fn animate(&self, readings: &[Reading], phase: u8) -> Result<()> {
+        for r in readings.iter().filter(|r| r.charging() && !r.full()) {
+            if let Some((_, t)) = self.shown.iter().find(|(k, _)| *k == r.key) {
+                t.set_icon(Some(make_icon(state_of(r, phase))?))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 pub fn run() -> Result<()> {
@@ -54,18 +125,17 @@ pub fn run() -> Result<()> {
         return Ok(());
     };
     let (menu, items) = build_menu()?;
-    let tray: TrayIcon = TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_menu_on_left_click(false)
-        .with_tooltip("PeriCore - reading battery...")
-        .with_icon(make_icon(IconState { percent: None, charging: false })?)
-        .build()?;
+    let mut icons = Icons { menu, shown: Vec::new() };
+    icons.shown.push((String::new(), icons.new_icon(IconState::default(), "PeriCore - reading battery...")?));
 
     let (tx, rx) = mpsc::channel::<Vec<Reading>>();
     let (wake_tx, wake_rx) = mpsc::channel::<()>();
     std::thread::spawn(move || monitor::run(tx, wake_rx));
 
-    let mut last: Option<Vec<Reading>> = None;
+    let (mut last, mut synced): (Vec<Reading>, bool) = (Vec::new(), false);
+    let (mut phase, mut next_frame) = (0u8, Instant::now());
+    let mut widget = if taskbar_enabled() { widget::Widget::new().ok() } else { None };
+    let mut next_place = Instant::now();
     loop {
         os::pump_messages(200);
 
@@ -79,6 +149,17 @@ pub fn run() -> Result<()> {
                 os::open_settings_window();
             } else if ev.id == items.refresh.id() {
                 let _ = wake_tx.send(());
+            } else if ev.id == items.taskbar.id() {
+                let on = items.taskbar.is_checked();
+                let _ = crate::store::save(TASKBAR_SETTING, &on);
+                if on {
+                    widget = widget::Widget::new().ok();
+                    if let Some(w) = &mut widget {
+                        w.update(&last);
+                    }
+                } else if let Some(mut w) = widget.take() {
+                    w.hide();
+                }
             } else if ev.id == items.autostart.id() {
                 let on = items.autostart.is_checked();
                 if os::set_autostart(on).is_err() {
@@ -89,10 +170,30 @@ pub fn run() -> Result<()> {
             }
         }
         while let Ok(readings) = rx.try_recv() {
-            if last.as_ref() != Some(&readings) {
-                tray.set_icon(Some(make_icon(primary_state(&readings))?))?;
-                tray.set_tooltip(Some(monitor::tooltip(&readings)))?;
-                last = Some(readings);
+            if !synced || readings != last {
+                synced = true;
+                icons.sync(&readings, phase)?;
+                if let Some(w) = &mut widget {
+                    w.update(&readings);
+                }
+                last = readings;
+            }
+        }
+        if let Some(w) = &mut widget {
+            if w.take_click() {
+                os::open_settings_window();
+            }
+            // Keep it in place and above the taskbar (which rises when clicked).
+            if Instant::now() >= next_place {
+                next_place = Instant::now() + Duration::from_secs(1);
+                w.redraw();
+            }
+        }
+        if Instant::now() >= next_frame {
+            next_frame = Instant::now() + ANIM_STEP;
+            if last.iter().any(|r| r.charging() && !r.full()) {
+                phase = (phase + 1) % icon::CHARGE_PHASES;
+                icons.animate(&last, phase)?;
             }
         }
     }

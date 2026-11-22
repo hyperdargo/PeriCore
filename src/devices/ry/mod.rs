@@ -1,6 +1,8 @@
 //! High-level operations for RY-protocol mice (wired or via 2.4G receiver).
 
+pub mod buttons;
 pub mod protocol;
+pub mod screen;
 
 use super::{db, Detected, Kind};
 use crate::hid::{Checksum, RyChannel, Target};
@@ -50,7 +52,7 @@ impl RyDevice {
     pub fn is_mouse(&self) -> bool {
         match self.info.kind {
             Kind::Mouse => true,
-            Kind::Keyboard => false,
+            Kind::Keyboard | Kind::Controller => false,
             Kind::Receiver => self
                 .paired_entry()
                 .is_some_and(|e| e.kind == "mouse" || (e.kind == "dangle" && !e.name.contains("keyboard"))),
@@ -110,6 +112,23 @@ impl RyDevice {
         self.wait_receiver()
     }
 
+    /// Raw receiver status (F7), for diagnostics.
+    pub fn receiver_status(&self) -> Result<[u8; 64]> {
+        self.chan.query_as(&[cmd::RECEIVER_STATUS], Checksum::None, Target::Direct)
+    }
+
+    /// Battery plus whether the mouse is asleep. A sleeping mouse behind a
+    /// receiver (F7 r[4] != 0) only gives its last reported level.
+    pub fn battery_status(&self) -> Result<(BatteryInfo, bool)> {
+        if self.info.kind == Kind::Receiver {
+            let reply = self.receiver_status()?;
+            let b = protocol::parse_receiver_status(&reply, true)
+                .ok_or_else(|| anyhow!("no battery in receiver status {:02x?}", &reply[..7]))?;
+            return Ok((b, reply[4] != 0));
+        }
+        Ok((self.battery()?, false))
+    }
+
     pub fn battery(&self) -> Result<BatteryInfo> {
         if self.info.kind == Kind::Receiver {
             let reply = self.chan.query_as(&[cmd::RECEIVER_STATUS], Checksum::None, Target::Direct)?;
@@ -148,4 +167,28 @@ impl RyDevice {
         self.write_cmd(&o.to_set_payload(self.profile))
     }
 
+
+    /// Reads the 16-slot button table of the active profile.
+    pub fn read_buttons(&self) -> Result<[[u8; 4]; buttons::SLOTS]> {
+        let reply = self.query_cmd(&[buttons::GET_KEYS, self.profile])?;
+        Ok(buttons::parse_table(&reply))
+    }
+
+    /// Writes one button slot in the active profile.
+    pub fn write_button(&self, slot: usize, action: buttons::ButtonAction) -> Result<()> {
+        self.write_cmd(&buttons::set_payload(self.profile, slot, action))
+    }
+
+    /// Uploads a macro to onboard index `index` (pages of 56 bytes, then the
+    /// 500 ms settle time the vendor app uses).
+    pub fn write_macro(&self, index: u8, m: &crate::macros::Macro) -> Result<()> {
+        if !m.fits_ry() {
+            return Err(anyhow!("macro is too long for the mouse ({} bytes)", m.ry_len()));
+        }
+        for page in crate::macros::ry_pages(index, m) {
+            self.write_cmd(&page)?;
+        }
+        sleep_ms(500);
+        Ok(())
+    }
 }

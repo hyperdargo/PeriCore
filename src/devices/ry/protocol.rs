@@ -14,6 +14,7 @@ pub mod cmd {
 }
 
 const MAX_SPEED: u8 = 4;
+#[allow(dead_code)] // lighting writes aren't exposed (the APEX mice have no LEDs); kept with its tests
 const OPT_NORMAL: u8 = 7;
 const OPT_DAZZLE: u8 = 8;
 
@@ -60,6 +61,7 @@ pub enum LightEffect {
     Laser,
 }
 
+#[allow(dead_code)] // lighting writes aren't exposed (the APEX mice have no LEDs); kept with its tests
 impl LightEffect {
     pub const ALL: [LightEffect; 7] = [
         Self::Off,
@@ -110,6 +112,7 @@ impl Default for Lighting {
     }
 }
 
+#[allow(dead_code)] // lighting writes aren't exposed (the APEX mice have no LEDs); kept with its tests
 impl Lighting {
     pub fn encode(&self) -> [u8; 8] {
         let mut b = [0u8; 8];
@@ -157,13 +160,14 @@ mod o0 {
     pub const SLEEP: usize = 40;
     pub const LIFT_CUTOFF: usize = 52;
     pub const ANGLE_SNAP: usize = 53;
+    pub const DOUBLE_CLICK: usize = 14;
 }
 
 #[allow(dead_code)] // full flag set documented for future UI options
 pub mod flag {
     pub const LIGHT_OFF: u16 = 1 << 0;
     pub const WHEEL_LIGHT_OFF: u16 = 1 << 1;
-    pub const MOTION_SYNC: u16 = 1 << 2;
+    pub const RIPPLE_CORRECTION: u16 = 1 << 2;
     pub const LED_SELECT: u16 = 1 << 3;
     pub const POWER_SAVE: u16 = 1 << 4;
 }
@@ -181,6 +185,13 @@ impl MouseOption0 {
     pub fn with_debounce_ms(&self, ms: u8) -> Self {
         self.with_byte(o0::DEBOUNCE, ms)
     }
+    /// Double-click interval (raw 1..255, as the vendor UI stores it).
+    pub fn double_click(&self) -> u8 {
+        self.0[o0::DOUBLE_CLICK]
+    }
+    pub fn with_double_click(&self, v: u8) -> Self {
+        self.with_byte(o0::DOUBLE_CLICK, v)
+    }
     pub fn flags(&self) -> u16 {
         u16::from_le_bytes([self.0[o0::FLAGS], self.0[o0::FLAGS + 1]])
     }
@@ -197,6 +208,7 @@ impl MouseOption0 {
     }
     /// Writes effect/speed/brightness/colour; keeps the option byte's upper
     /// nibble (wave direction etc.) and the reserved 8th byte as read.
+    #[allow(dead_code)] // see Lighting
     pub fn with_lighting(&self, l: &Lighting) -> Self {
         let mut b = self.0;
         let enc = l.encode();
@@ -319,9 +331,6 @@ pub fn parse_battery(reply: &[u8]) -> Option<BatteryInfo> {
     Some(BatteryInfo { percent: reply[1], state })
 }
 
-/// Parses the receiver status reply to F7 (docs/ajazz-dangle-protocol.md):
-/// r[1] = keyboard battery, r[2] = mouse battery. The receiver doesn't report
-/// charging here, so state is always Discharging.
 /// Whether the receiver can pass a command to / reply from the paired mouse:
 /// r[4]==0 means the mouse is online (awake), r[5]==1 means the last write
 /// finished. Both gates come from the vendor helper's status decoder.
@@ -329,6 +338,9 @@ pub fn receiver_mouse_ready(status: &[u8]) -> bool {
     status.get(4) == Some(&0) && status.get(5) == Some(&1)
 }
 
+/// Parses the receiver status reply to F7 (docs/ajazz-dangle-protocol.md):
+/// r[1] = keyboard battery, r[2] = mouse battery. The receiver doesn't report
+/// charging here, so state is always Discharging.
 pub fn parse_receiver_status(reply: &[u8], mouse: bool) -> Option<BatteryInfo> {
     let level = *reply.get(if mouse { 2 } else { 1 })?;
     (1..=100)
@@ -387,9 +399,9 @@ mod tests {
     fn option0_edits_preserve_other_bytes() {
         let mut raw = [0xAAu8; 64];
         raw[9] = 1;
-        let o = MouseOption0(raw).with_poll_rate(4000).with_flag(flag::MOTION_SYNC, true);
+        let o = MouseOption0(raw).with_poll_rate(4000).with_flag(flag::RIPPLE_CORRECTION, true);
         assert_eq!(o.poll_rate(), Some(4000));
-        assert!(o.has_flag(flag::MOTION_SYNC));
+        assert!(o.has_flag(flag::RIPPLE_CORRECTION));
         assert_eq!(o.0[20], 0xAA);
         assert_eq!(o.to_set_payload()[0], cmd::MOUSE_SET_OPTION0);
     }

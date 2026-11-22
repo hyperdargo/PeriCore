@@ -85,6 +85,16 @@ fn window_exe(hwnd: HWND) -> Option<PathBuf> {
 /// Brings our own settings window to the front (ignores other windows that
 /// happen to share the title, e.g. an Explorer folder). Returns false if none.
 pub fn focus_settings_window() -> bool {
+    focus_window(true)
+}
+
+/// Brings any PeriCore settings window forward, even one from another copy
+/// of the exe (e.g. a second download), when the single-instance lock is held.
+pub fn focus_any_settings_window() -> bool {
+    focus_window(false)
+}
+
+fn focus_window(same_exe: bool) -> bool {
     let title = wide(WINDOW_TITLE);
     let me = std::env::current_exe().ok().and_then(|p| p.canonicalize().ok());
     let mut hwnd: HWND = std::ptr::null_mut();
@@ -95,7 +105,8 @@ pub fn focus_settings_window() -> bool {
             return false;
         }
         let owner = window_exe(hwnd).and_then(|p| p.canonicalize().ok());
-        if owner.is_some() && owner == me {
+        let ours = owner.as_ref().is_some_and(|o| o.file_stem().is_some_and(|n| n.to_string_lossy().starts_with("PeriCore")));
+        if (owner.is_some() && owner == me) || (!same_exe && ours) {
             // SAFETY: hwnd is a live top-level window owned by our exe.
             unsafe {
                 if IsIconic(hwnd) != 0 {
@@ -145,4 +156,77 @@ pub fn set_autostart(on: bool) -> Result<()> {
         bail!("reg.exe failed");
     }
     Ok(())
+}
+
+/// Held by the settings window while it uploads to the dock screen, so the
+/// tray's battery poll doesn't interleave with the transfer.
+pub const SCREEN_BUSY: &str = "PeriCore.ScreenBusy";
+
+pub fn screen_busy() -> bool {
+    SingleInstance::acquire(SCREEN_BUSY).is_none()
+}
+
+/// Local wall-clock time: (year, month, day, hour, minute, second).
+pub fn local_time() -> (u16, u8, u8, u8, u8, u8) {
+    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    // SAFETY: GetLocalTime fills the struct we pass.
+    let t = unsafe {
+        let mut t = std::mem::zeroed();
+        GetLocalTime(&mut t);
+        t
+    };
+    (t.wYear, t.wMonth as u8, t.wDay as u8, t.wHour as u8, t.wMinute as u8, t.wSecond as u8)
+}
+
+/// Native "Open" dialog for images; None if cancelled.
+pub fn pick_image_file() -> Option<PathBuf> {
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    let filter = wide("Images (*.gif;*.png;*.jpg;*.jpeg)\0*.gif;*.png;*.jpg;*.jpeg\0All files\0*.*\0");
+    let mut buf = vec![0u16; 1024];
+    // SAFETY: zeroed is a valid OPENFILENAMEW; required fields are set below.
+    let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+    ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    ofn.lpstrFilter = filter.as_ptr();
+    ofn.lpstrFile = buf.as_mut_ptr();
+    ofn.nMaxFile = buf.len() as u32;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    // SAFETY: ofn points to valid buffers that outlive the call.
+    if unsafe { GetOpenFileNameW(&mut ofn) } == 0 {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(PathBuf::from(String::from_utf16_lossy(&buf[..len])))
+}
+
+/// Vendor helpers that poll the devices and break uploads if left running.
+const VENDOR_PROCS: [&str; 2] = ["iot_driver", "AJAZZ Driver"];
+
+fn tasklist() -> String {
+    Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// True if the AJAZZ app or its driver helper is running.
+pub fn vendor_app_running() -> bool {
+    let list = tasklist();
+    VENDOR_PROCS.iter().any(|p| list.contains(p))
+}
+
+/// Closes the AJAZZ app and its helper (the user's explicit choice).
+pub fn close_vendor_apps() {
+    for line in tasklist().lines() {
+        let name = line.split(',').next().unwrap_or("").trim_matches('"');
+        if VENDOR_PROCS.iter().any(|p| name.starts_with(p)) {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/IM", name])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
+    }
 }

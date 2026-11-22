@@ -69,7 +69,8 @@ impl KbLighting {
         p[12..15].copy_from_slice(&bg);
         p[15] = self.direction;
         p[16] = mode_type;
-        p[17] = self.on as u8;
+        // Verified on hardware: 0 = backlight on, 1 = off.
+        p[17] = u8::from(!self.on);
         p
     }
 }
@@ -128,7 +129,7 @@ mod tests {
         let p = l.packet();
         assert_eq!(&p[..9], &[1, 7, 0, 0, 0, 0x0E, 3, 4, 1]);
         assert_eq!(&p[9..12], &[255, 0, 0]);
-        assert_eq!(p[17], 1);
+        assert_eq!(p[17], 0); // on
         assert!(p[18..].iter().all(|&b| b == 0));
     }
 

@@ -138,7 +138,7 @@ Full request:
 | 12–14 | ledBgR, ledBgG, ledBgB | 0x00700FBE–0x00700FE7; 0x007010D6–0x007010FF |
 | 15 | ledDirection | 0x00701103–0x0070110E |
 | 16 | ledModeType | 0x00701112–0x0070111D |
-| 17 | ledOpenOrClose | 0x00701121–0x0070112C |
+| 17 | ledOpenOrClose: **00 = on, 01 = off (verified on hardware 2026-11-18)** | 0x00701121–0x0070112C |
 | 18–63 | 00; includes two zero bytes within declared 0E payload | 0x00701130–0x0070118F |
 
 **CONFIRMED:** ledType 00 forces ledModeType to 00 at 0x00700F54–0x00700F60. For types 05,06,07,08,09,0B,0C the six RGB bytes are copied directly regardless of ledModeType (0x00700F67–0x00700FEB). For other types, ledModeType==1 forces bytes 9–14 to FF 00 00 00 00 00; otherwise RGB is copied (0x00700FF0–0x00701103). Therefore it would be incorrect to assume modeType is always just an arbitrary color-enable flag.

@@ -2,6 +2,7 @@
 
 pub mod db;
 pub mod fantech;
+pub mod playstation;
 pub mod ry;
 
 use hidapi::HidApi;
@@ -13,6 +14,8 @@ pub enum Kind {
     Keyboard,
     /// 2.4G USB receiver; the real device sits behind it.
     Receiver,
+    /// Game controller (USB or Bluetooth).
+    Controller,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +24,8 @@ pub enum Family {
     Ry,
     /// Fantech MAXFIT61 (MK857, XS61BRGB firmware, VID 0416 PID C345).
     FantechMaxfit61,
+    /// Sony DualShock 4 / DualSense (battery only).
+    PlayStation,
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +43,9 @@ pub fn discover(api: &HidApi) -> Vec<Detected> {
     let mut found: Vec<Detected> = Vec::new();
     for d in api.device_list() {
         let (vid, pid) = (d.vendor_id(), d.product_id());
-        let hit = if fantech::matches(d) {
+        let hit = if playstation::matches(vid, pid, d.usage_page(), d.usage()) {
+            playstation::lookup(vid, pid).map(|(_, name)| (Family::PlayStation, Kind::Controller, name.to_string()))
+        } else if fantech::matches(d) {
             Some((Family::FantechMaxfit61, Kind::Keyboard, fantech::NAME.to_string()))
         } else {
             ry_match(vid, pid, d.usage_page(), d.usage())

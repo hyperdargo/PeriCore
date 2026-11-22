@@ -1,9 +1,12 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
+mod battery_log;
 mod devices;
 mod hid;
 mod os;
 mod probe;
+mod macros;
+mod store;
 mod tray;
 mod ui;
 
@@ -27,6 +30,10 @@ fn main() -> anyhow::Result<()> {
             probe::listen(hex(a.first(), 0x3151), hex(a.get(1), 0x5007), secs)
         }
         "--tray" => tray::run(),
+        "--dock-upload" => {
+            attach_console();
+            probe::dock_upload(std::env::args().nth(2).unwrap_or_default().into())
+        }
         _ => ui::run(),
     }
 }

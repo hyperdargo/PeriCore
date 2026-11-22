@@ -1,5 +1,7 @@
 //! Fantech MAXFIT61 driver (interrupt-report protocol on interface MI_02).
 
+pub mod keymap;
+pub mod layout;
 pub mod protocol;
 
 use super::Detected;
@@ -87,5 +89,63 @@ impl Maxfit61 {
         let mut p = protocol::simple(protocol::op::RESET);
         p[6] = 1;
         self.send(&p)
+    }
+
+    /// Sends one report and waits briefly for the same opcode back, retrying
+    /// like the vendor app does (100 ms timeout, up to 3 resends).
+    fn send_acked(&self, packet: &[u8; LEN]) -> Result<()> {
+        for _ in 0..4 {
+            self.drain();
+            self.send(packet)?;
+            let deadline = Instant::now() + Duration::from_millis(100);
+            let mut buf = [0u8; LEN];
+            while Instant::now() < deadline {
+                let n = self.dev.read_timeout(&mut buf, 20)?;
+                if n >= 2 && buf[1] == packet[1] {
+                    return Ok(());
+                }
+            }
+        }
+        Err(anyhow!("keyboard didn't acknowledge opcode {:02X} page {}", packet[1], packet[4]))
+    }
+
+    /// Uploads a macro into keyboard slot 0..9 (five acknowledged pages).
+    pub fn write_macro(&self, slot: u8, m: &crate::macros::Macro) -> Result<()> {
+        if usize::from(slot) >= crate::macros::KB_SLOTS || !m.fits_kb() {
+            return Err(anyhow!("macro {} doesn't fit the keyboard (max {} events, slots 1-10)", slot + 1, crate::macros::KB_MAX_EVENTS));
+        }
+        for page in crate::macros::kb_pages(slot, m) {
+            self.send_acked(&page)?;
+        }
+        Ok(())
+    }
+
+    /// Writes the whole Default-layer keymap (10 pages).
+    pub fn write_keymap(&self, km: &keymap::Keymap) -> Result<()> {
+        for page in km.pages() {
+            self.send_acked(&page)?;
+        }
+        Ok(())
+    }
+
+    /// Switches to the custom per-key effect and uploads the colour matrix.
+    pub fn write_custom_rgb(&self, colors: &[[u8; 3]; layout::CELLS], brightness: u8) -> Result<()> {
+        let effect = KbLighting {
+            effect: keymap::CUSTOM_EFFECT,
+            brightness,
+            speed: 1,
+            on: true,
+            ..Default::default()
+        }
+        .packet();
+        self.send(&keymap::light_sync(false))?;
+        std::thread::sleep(Duration::from_millis(5));
+        self.send(&effect)?;
+        for page in keymap::rgb_pages(0, colors) {
+            std::thread::sleep(Duration::from_millis(5));
+            self.send(&page)?;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        self.send(&effect)
     }
 }

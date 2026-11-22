@@ -1,9 +1,20 @@
-//! Mouse settings panel: DPI stages, polling rate, sensor options, lighting.
+//! Mouse settings panel: DPI stages, polling rate, sensor options, buttons, macros.
 
-use crate::devices::ry::protocol::{flag, LightEffect, Lighting, MouseOption0, MouseOption1, MAX_DPI_STAGES, POLL_RATES};
-use crate::devices::ry::protocol::ChargeState;
+use crate::devices::ry::protocol::{flag, MouseOption0, MouseOption1, MAX_DPI_STAGES, POLL_RATES};
 use crate::devices::ry::RyDevice;
+use super::dock::DockTab;
+use super::macro_editor::{MacroEditor, Target};
+use super::mouse_buttons::ButtonsTab;
+use super::theme;
 use eframe::egui;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Performance,
+    Buttons,
+    Macros,
+    Dock,
+}
 
 const DEFAULT_COLORS: [[u8; 3]; MAX_DPI_STAGES] = [
     [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0],
@@ -18,13 +29,12 @@ struct Form {
     /// None = device reported a code we don't understand; left untouched on save.
     rate: Option<u32>,
     debounce: u8,
-    motion_sync: bool,
+    ripple: bool,
+    double_click: u8,
     power_save: bool,
     angle_snap: bool,
     lift_cutoff: u8,
     sleep_secs: u16,
-    /// None = unknown lighting block; left untouched on save.
-    lighting: Option<Lighting>,
 }
 
 impl Form {
@@ -36,12 +46,12 @@ impl Form {
             stages,
             rate: o0.poll_rate(),
             debounce: o0.debounce_ms(),
-            motion_sync: o0.has_flag(flag::MOTION_SYNC),
+            ripple: o0.has_flag(flag::RIPPLE_CORRECTION),
+            double_click: o0.double_click(),
             power_save: o0.has_flag(flag::POWER_SAVE),
             angle_snap: o0.angle_snap(),
             lift_cutoff: o0.lift_cutoff(),
             sleep_secs: o0.sleep_secs(),
-            lighting: o0.lighting(),
         }
     }
 
@@ -50,12 +60,10 @@ impl Form {
         if let Some(hz) = self.rate {
             n0 = n0.with_poll_rate(hz);
         }
-        if let Some(l) = &self.lighting {
-            n0 = n0.with_lighting(l);
-        }
         let n0 = n0
             .with_debounce_ms(self.debounce)
-            .with_flag(flag::MOTION_SYNC, self.motion_sync)
+            .with_double_click(self.double_click)
+            .with_flag(flag::RIPPLE_CORRECTION, self.ripple)
             .with_flag(flag::POWER_SAVE, self.power_save)
             .with_angle_snap(self.angle_snap)
             .with_lift_cutoff(self.lift_cutoff)
@@ -65,29 +73,41 @@ impl Form {
     }
 }
 
+const BATTERY_REFRESH_S: f64 = 15.0;
+
 pub struct MousePanel {
     dev: RyDevice,
     title: String,
-    battery: Option<String>,
+    /// (percent, charging) and when it was last read.
+    battery: Option<(u8, bool)>,
+    battery_at: f64,
+    tab: Tab,
+    buttons: ButtonsTab,
+    macros: MacroEditor,
+    /// Present for 2.4G receivers with a dock screen.
+    dock: Option<DockTab>,
     loaded: Option<(MouseOption0, MouseOption1)>,
     form: Option<Form>,
     status: Option<Result<String, String>>,
 }
 
 impl MousePanel {
-    pub fn new(dev: RyDevice) -> Self {
+    pub fn new(dev: RyDevice, screen: Option<crate::devices::ry::screen::ScreenLink>) -> Self {
         let title = dev.identify().unwrap_or_else(|| dev.info.name.clone());
-        let mut p = Self { dev, title, battery: None, loaded: None, form: None, status: None };
+        let mut p = Self { dev, title, battery: None, battery_at: 0.0, tab: Tab::Performance, buttons: ButtonsTab::new(), macros: MacroEditor::new(Target::Mouse), dock: screen.map(|l| DockTab::new(Some(l))), loaded: None, form: None, status: None };
         p.reload();
         p
     }
 
+    fn read_battery(&mut self) {
+        use crate::devices::ry::protocol::ChargeState;
+        self.battery = self.dev.battery().ok().map(|b| (b.percent, b.state != ChargeState::Discharging));
+    }
+
     fn reload(&mut self) {
-        self.battery = self.dev.battery().ok().map(|b| match b.state {
-            ChargeState::Discharging => format!("{}%", b.percent),
-            s => format!("{}% ({s:?})", b.percent),
-        });
+        self.read_battery();
         let read = self.dev.read_option0().and_then(|o0| Ok((o0, self.dev.read_option1()?)));
+        self.buttons.table = if read.is_ok() { self.dev.read_buttons().ok() } else { None };
         match read {
             Ok((o0, o1)) => {
                 self.form = Some(Form::from_device(&o0, &o1));
@@ -117,37 +137,73 @@ impl MousePanel {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
-        ui.heading(&self.title);
-        ui.horizontal(|ui| {
-            ui.label(format!("Battery: {}", self.battery.as_deref().unwrap_or("unavailable")));
-            if ui.button("Reload").clicked() {
-                self.reload();
-            }
-        });
-        super::status_line(ui, &self.status);
-        ui.separator();
+        let subtitle = match self.dev.info.kind {
+            crate::devices::Kind::Receiver => "Wireless mouse · 2.4G receiver",
+            _ => "Wired mouse",
+        };
+        // Re-read battery now and then so docking/undocking shows up.
+        let now = ui.input(|i| i.time);
+        if now - self.battery_at > BATTERY_REFRESH_S && !crate::os::screen_busy() {
+            self.battery_at = now;
+            self.read_battery();
+        }
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(BATTERY_REFRESH_S));
+        super::header(ui, &self.title, subtitle, self.battery);
+        let mut tabs = vec![(Tab::Performance, "Performance"), (Tab::Buttons, "Buttons"), (Tab::Macros, "Macros")];
+        if self.dock.is_some() {
+            tabs.push((Tab::Dock, "Dock screen"));
+        }
+        theme::tabs(ui, &mut self.tab, &tabs);
+        ui.add_space(10.0);
 
         let mut save = false;
+        let mut reload = false;
         if let Some(form) = &mut self.form {
-            dpi_section(ui, form);
-            performance_section(ui, form);
-            match &mut form.lighting {
-                Some(l) => lighting_section(ui, l),
-                None => {
-                    ui.weak("Lighting: unknown format on this model (left unchanged).");
+            match self.tab {
+                Tab::Performance => {
+                    dpi_section(ui, form);
+                    performance_section(ui, form);
                 }
+                Tab::Buttons | Tab::Dock | Tab::Macros => {}
             }
-            ui.add_space(8.0);
-            save = ui.add_sized([140.0, 32.0], egui::Button::new("💾 Apply to mouse")).clicked();
         }
+        if self.tab == Tab::Macros {
+            self.macros.show(ui);
+            theme::card(ui, "Use a macro", |ui| {
+                ui.label("Assign a macro to a button in the Buttons tab (choose Macro). It's uploaded to the mouse when you press Apply there.")
+            });
+            return;
+        }
+        if self.tab == Tab::Dock {
+            if let Some(d) = &mut self.dock {
+                d.show(ui);
+            }
+            return;
+        }
+        if self.tab == Tab::Buttons {
+            if let Some(s) = self.buttons.show(ui, &self.dev) {
+                self.status = Some(s);
+            }
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if self.form.is_some() && self.tab != Tab::Buttons {
+                save = theme::primary(ui, "💾  Apply to mouse");
+            }
+            reload = ui.add_sized([110.0, 34.0], egui::Button::new("⟳  Reload")).clicked();
+            super::status_line(ui, &self.status);
+        });
         if save {
             self.save();
+        }
+        if reload {
+            self.reload();
         }
     }
 }
 
 fn dpi_section(ui: &mut egui::Ui, f: &mut Form) {
-    ui.collapsing("DPI", |ui| {
+    theme::card(ui, "DPI stages", |ui| {
         let mut count = f.stages.len();
         ui.add(egui::Slider::new(&mut count, 1..=MAX_DPI_STAGES).text("stages"));
         while f.stages.len() < count {
@@ -166,47 +222,27 @@ fn dpi_section(ui: &mut egui::Ui, f: &mut Form) {
                 ui.end_row();
             }
         });
-    })
-    .header_response
-    .on_hover_text("Selected stage is the active DPI");
+        ui.label(egui::RichText::new("The selected stage is the active DPI.").color(theme::MUTED));
+    });
 }
 
 fn performance_section(ui: &mut egui::Ui, f: &mut Form) {
-    ui.collapsing("Performance", |ui| {
+    theme::card(ui, "Sensor & performance", |ui| {
         let shown = f.rate.map_or("Unknown (unchanged)".to_string(), |hz| format!("{hz} Hz"));
         egui::ComboBox::from_label("Polling rate").selected_text(shown).show_ui(ui, |ui| {
             for hz in POLL_RATES {
                 ui.selectable_value(&mut f.rate, Some(hz), format!("{hz} Hz"));
             }
         });
+        if f.double_click > 0 {
+            ui.add(egui::Slider::new(&mut f.double_click, 1..=255).text("Double-click interval"));
+        }
         ui.add(egui::Slider::new(&mut f.debounce, 0..=30).clamping(egui::SliderClamping::Never).text("Debounce (ms)"));
         ui.add(egui::Slider::new(&mut f.lift_cutoff, 0..=2).clamping(egui::SliderClamping::Never).text("Lift-off distance (0 low - 2 high)"));
-        ui.checkbox(&mut f.motion_sync, "Motion sync");
+        ui.checkbox(&mut f.ripple, "Ripple correction (smoother tracking)");
         ui.checkbox(&mut f.angle_snap, "Angle snapping");
         ui.checkbox(&mut f.power_save, "Power-saving mode");
         ui.add(egui::Slider::new(&mut f.sleep_secs, 0..=1800).clamping(egui::SliderClamping::Never).text("Sleep after idle (s, 0 = never)"));
-    })
-    .header_response
-    .on_hover_text("Polling rates above 1000 Hz need the 8K receiver");
-}
-
-pub(crate) fn lighting_section(ui: &mut egui::Ui, l: &mut Lighting) {
-    ui.collapsing("Lighting", |ui| {
-        egui::ComboBox::from_label("Effect").selected_text(l.effect.label()).show_ui(ui, |ui| {
-            for e in LightEffect::ALL {
-                ui.selectable_value(&mut l.effect, e, e.label());
-            }
-        });
-        if l.effect != LightEffect::Off {
-            ui.add(egui::Slider::new(&mut l.brightness, 0..=4).text("Brightness"));
-            ui.add(egui::Slider::new(&mut l.speed, 0..=4).text("Speed"));
-            ui.checkbox(&mut l.rainbow, "Rainbow colours");
-            if !l.rainbow {
-                ui.horizontal(|ui| {
-                    ui.label("Colour");
-                    egui::color_picker::color_edit_button_srgb(ui, &mut l.rgb);
-                });
-            }
-        }
+        ui.label(egui::RichText::new("Polling rates above 1000 Hz need the 8K receiver.").color(theme::MUTED));
     });
 }

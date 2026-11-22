@@ -155,3 +155,13 @@ Verified on hardware: GET `D3`/`D4` and SET `54` reach an AJ159/AJ179 APEX throu
    For a SET: poll `F7` until the write finishes.
 
 A sleeping mouse reports r[4] = 1. Moving it wakes it within a second or two.
+
+## Charging over the receiver (tested 2026-11-22)
+
+**CONFIRMED (negative):** with an AJ159 APEX on its charging dock, the F7 status
+changes only in r[2] (battery level) and r[4] (awake/asleep); r[3] and r[6] stay
+`01` / `02`. A routed `82` (GET_BATTERY) returns an empty body
+(`82 00 00 00 00 00 00 7D 00…`). No unsolicited input report arrives on either
+vendor interface when the mouse is docked or undocked. The vendor app also hard-codes
+`batteryState: 0` for 2.4G devices. Charging state is therefore not visible over
+the receiver; PeriCore shows it only for wired mice (82 reply byte 2).

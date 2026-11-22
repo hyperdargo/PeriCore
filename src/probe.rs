@@ -17,6 +17,14 @@ pub fn run() -> Result<()> {
         match d.family {
             Family::Ry => probe_ry(&api, d),
             Family::FantechMaxfit61 => probe_fantech(&api, d),
+            Family::PlayStation => {
+                if let Some((model, _)) = devices::playstation::lookup(d.vid, d.pid) {
+                    match devices::playstation::read_battery(&api, &d.path, model) {
+                        Ok(b) => println!("   battery -> {}% {:?}", b.percent, b.state),
+                        Err(e) => println!("   battery -> ERR {e:#}"),
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -71,6 +79,9 @@ fn probe_ry(api: &HidApi, d: &devices::Detected) {
             Ok(b) => println!("   receiver battery -> {}% {:?}", b.percent, b.state),
             Err(e) => println!("   receiver battery -> ERR {e:#}"),
         }
+        if let Ok(r) = dev.receiver_status() {
+            println!("   status F7 -> {}", hex(&r[..16]));
+        }
         if !dev.is_mouse() {
             return;
         }
@@ -82,6 +93,17 @@ fn probe_ry(api: &HidApi, d: &devices::Detected) {
     match dev.read_option1() {
         Ok(o) => println!("   option1  -> {}\n      dpi={:?} current={}", hex(&o.0), o.stages(), o.current_stage()),
         Err(e) => println!("   option1  -> ERR {e:#}"),
+    }
+    match dev.read_buttons() {
+        Ok(t) => {
+            println!("   buttons:");
+            for (slot, name) in devices::ry::buttons::BUTTONS {
+                let a = devices::ry::buttons::ButtonAction::decode(t[slot]);
+                println!("      {name:18} {} -> {}", hex(&t[slot]), a.label());
+            }
+            println!("      raw: {}", hex(t.as_flattened()));
+        }
+        Err(e) => println!("   buttons  -> ERR {e:#}"),
     }
 }
 
@@ -96,4 +118,27 @@ fn probe_fantech(api: &HidApi, d: &devices::Detected) {
         }
         Err(e) => println!("   open failed: {e:#}"),
     }
+}
+
+
+/// `--dock-upload FILE`: uploads a GIF/picture to the dock screen with
+/// verbose output (set PERICORE_DEBUG=1 to see handshake replies).
+pub fn dock_upload(path: std::path::PathBuf) -> Result<()> {
+    use crate::devices::ry::screen::{self, ScreenLink};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let api = HidApi::new()?;
+    let d = devices::discover(&api)
+        .into_iter()
+        .find(|d| d.kind == devices::Kind::Receiver)
+        .ok_or_else(|| anyhow::anyhow!("no receiver found"))?;
+    let link = ScreenLink::open(&api, &d.path)?;
+    println!("receiver {}  screen version {:?}", d.path.to_string_lossy(), link.version());
+    let anim = screen::load(&path)?;
+    println!("{} frame(s), delay {} ms", anim.frames.len(), anim.delay_ms);
+    let _busy = crate::os::SingleInstance::acquire(crate::os::SCREEN_BUSY);
+    let (p, c) = (AtomicUsize::new(0), AtomicBool::new(false));
+    let t = std::time::Instant::now();
+    let res = link.upload(&anim, 0, &p, &c);
+    println!("sent {} chunks in {:.1}s -> {:?}", p.load(Ordering::Relaxed), t.elapsed().as_secs_f32(), res);
+    res
 }
