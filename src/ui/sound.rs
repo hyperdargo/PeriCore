@@ -21,6 +21,12 @@ pub struct SoundPanel {
     msg: Option<Result<String, String>>,
     /// Name typed into "Save as preset".
     new_name: String,
+    /// Set by a "Turn on now" click; acted on after the frame's cards.
+    want_enable: std::cell::Cell<bool>,
+    /// Running admin helper that turns Equalizer APO on for devices.
+    job: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    /// Equalizer APO was turned on here; Windows applies it after a restart.
+    restart_needed: bool,
 }
 
 impl SoundPanel {
@@ -34,6 +40,9 @@ impl SoundPanel {
             dirty: false,
             msg: None,
             new_name: String::new(),
+            want_enable: std::cell::Cell::new(false),
+            job: None,
+            restart_needed: false,
         }
         .with_active()
     }
@@ -57,11 +66,55 @@ impl SoundPanel {
         ui.add_space(4.0);
         ui.colored_label(
             theme::WARN,
-            format!(
-                "⚠  Equalizer APO isn't turned on for {}, so nothing changes yet. Click \"Choose devices…\" above, tick it, press OK, then restart Windows.",
-                names.join(", ")
-            ),
+            format!("⚠  Equalizer APO isn't turned on for {}, so nothing changes yet.", names.join(", ")),
         );
+        ui.horizontal(|ui| {
+            if self.job.is_some() {
+                ui.spinner();
+                ui.label("Waiting for administrator permission…");
+            } else if theme::primary(ui, "Turn on now") {
+                self.want_enable.set(true);
+            }
+            ui.label(RichText::new("Asks for admin rights, then needs one Windows restart.").size(12.0).color(theme::MUTED));
+        });
+    }
+
+    /// Chosen devices (output, and the mic when suppression is on) without Equalizer APO.
+    fn missing_targets(&self) -> Vec<(bool, String)> {
+        let outputs: Vec<&Device> = if self.s.outputs.is_empty() { self.outputs.iter().collect() } else { self.s.outputs.iter().collect() };
+        let mut t: Vec<(bool, String)> = outputs.iter().filter(|d| !self.active.0.contains(&d.id)).map(|d| (false, d.id.clone())).collect();
+        if let (true, Some(m)) = (self.s.mic.enabled, &self.s.mic.device) {
+            if !self.active.1.contains(&m.id) {
+                t.push((true, m.id.clone()));
+            }
+        }
+        t
+    }
+
+    /// Starts or polls the admin helper that turns Equalizer APO on.
+    fn run_enable_job(&mut self, ctx: &egui::Context) {
+        if self.want_enable.take() && self.job.is_none() {
+            let targets = self.missing_targets();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let repaint = ctx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(audio::enable_devices(&targets).map_err(|e| format!("{e:#}")));
+                repaint.request_repaint();
+            });
+            self.job = Some(rx);
+        }
+        let Some(rx) = &self.job else { return };
+        let Ok(result) = rx.try_recv() else { return };
+        self.job = None;
+        match result {
+            Ok(()) => {
+                self.restart_needed = true;
+                self.msg = Some(Ok("Equalizer APO is turned on. Restart Windows to hear it.".into()));
+                self.dirty = true;
+            }
+            Err(e) => self.msg = Some(Err(e)),
+        }
+        self.load_active();
     }
 
     fn refresh(&mut self) {
@@ -79,6 +132,7 @@ impl SoundPanel {
         self.mode_card(ui);
         self.correction_card(ui);
         self.mic_card(ui);
+        self.run_enable_job(ui.ctx());
         // A change by hand means the saved preset is no longer what's playing.
         if !picked && before != (self.s.enabled, self.s.correction_on, self.s.bands) {
             self.s.active_profile = None;
@@ -120,7 +174,13 @@ impl SoundPanel {
             eapo::Status::Ready => {
                 ui.horizontal(|ui| {
                     ui.colored_label(theme::GOOD, "✔  Equalizer APO connected");
-                    if ui.button("Choose devices…").on_hover_text("Opens Equalizer APO's Device Selector (needs admin). Tick the devices PeriCore should change, then restart.").clicked() {
+                    if self.restart_needed {
+                        ui.colored_label(theme::WARN, "Restart Windows to finish");
+                        if ui.button("Restart now").clicked() {
+                            os::restart_windows();
+                        }
+                    }
+                    if ui.button("Choose devices…").on_hover_text("Opens Equalizer APO's own Device Selector, for devices PeriCore can't turn on itself.").clicked() {
                         eapo::open_configurator();
                     }
                     if ui.button("⟳").on_hover_text("Reload the device list").clicked() {
@@ -339,7 +399,7 @@ impl SoundPanel {
                     self.inactive_warning(ui, &[d]);
                 }
             }
-            ui.label(RichText::new("RNNoise needs the mic at 48 kHz: Sound settings > your mic > Properties > Advanced. The mic must also be ticked in Equalizer APO's Device Selector.").size(12.0).color(theme::MUTED));
+            ui.label(RichText::new("RNNoise needs the mic at 48 kHz: Sound settings > your mic > Properties > Advanced. Equalizer APO must be turned on for the mic too.").size(12.0).color(theme::MUTED));
         });
     }
 }

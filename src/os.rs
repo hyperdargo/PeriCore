@@ -260,3 +260,39 @@ pub fn log_error(msg: &str) {
 pub fn install_panic_log() {
     std::panic::set_hook(Box::new(|info| log_error(&format!("panic: {info}"))));
 }
+
+/// Runs this exe again as administrator (Windows shows its UAC prompt) with
+/// `args`, waits for it and returns its exit code. Err if the prompt was
+/// declined or the program couldn't start.
+pub fn run_self_elevated(args: &[String]) -> Result<u32> {
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+    use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    let exe = wide(&std::env::current_exe()?.display().to_string());
+    let params = wide(&args.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(" "));
+    let verb = wide("runas");
+    // SAFETY: zeroed is a valid SHELLEXECUTEINFOW; the strings outlive the call.
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = exe.as_ptr();
+    info.lpParameters = params.as_ptr();
+    info.nShow = 0; // SW_HIDE
+    // SAFETY: info is fully initialised above.
+    if unsafe { ShellExecuteExW(&mut info) } == 0 || info.hProcess.is_null() {
+        bail!("administrator permission was declined");
+    }
+    let mut code = 1u32;
+    // SAFETY: hProcess is a valid handle from ShellExecuteExW; closed once.
+    unsafe {
+        WaitForSingleObject(info.hProcess, INFINITE);
+        GetExitCodeProcess(info.hProcess, &mut code);
+        CloseHandle(info.hProcess);
+    }
+    Ok(code)
+}
+
+/// Restarts Windows right away (the user clicked "Restart now").
+pub fn restart_windows() {
+    let _ = Command::new("shutdown").args(["/r", "/t", "0"]).creation_flags(CREATE_NO_WINDOW).spawn();
+}

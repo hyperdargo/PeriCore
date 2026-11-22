@@ -56,6 +56,11 @@ fn run_mode(arg: &str) -> anyhow::Result<()> {
             println!("Sound preset: {name}");
             Ok(())
         }
+        // Elevated helper started by the Sound page (see audio::enable_devices).
+        "--eapo-device" => {
+            let a: Vec<String> = std::env::args().skip(2).collect();
+            audio::run_device_helper(&a)
+        }
         "--dock-upload" => {
             attach_console();
             probe::dock_upload(std::env::args().nth(2).unwrap_or_default().into())

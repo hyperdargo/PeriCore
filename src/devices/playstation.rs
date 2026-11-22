@@ -7,8 +7,10 @@
 //! - DualShock 4 USB report 0x01 (64 B): status at byte 30. Bluetooth 0x11: byte 32.
 //!   Low nibble = level, bit 4 = cable plugged in (level 11 = full on cable).
 //!
-//! Over Bluetooth both pads start in a short "basic" report without battery;
-//! reading their calibration feature report switches them to the full report.
+//! Over Bluetooth both pads start in a "basic" report 0x01 without battery
+//! (Windows pads it with zeros, so it must not be read as the USB report);
+//! reading their Bluetooth calibration feature report (0x05) switches them to
+//! the full report (DualShock 4: 0x11, DualSense: 0x31).
 
 use crate::devices::ry::protocol::{BatteryInfo, ChargeState};
 use anyhow::{anyhow, Result};
@@ -84,12 +86,10 @@ pub fn parse(model: Model, r: &[u8]) -> Option<BatteryInfo> {
 }
 
 /// Asks a Bluetooth pad for its calibration data, which makes it send full reports.
-fn enable_full_reports(dev: &HidDevice, model: Model) {
+fn enable_full_reports(dev: &HidDevice) {
     let mut buf = [0u8; 64];
-    buf[0] = match model {
-        Model::DualSense => 0x05,
-        Model::DualShock4 => 0x02,
-    };
+    // 0x05 is the Bluetooth calibration report on both pads.
+    buf[0] = 0x05;
     let _ = dev.get_feature_report(&mut buf);
 }
 
@@ -97,12 +97,23 @@ fn enable_full_reports(dev: &HidDevice, model: Model) {
 pub struct Pad {
     dev: HidDevice,
     pub model: Model,
+    bluetooth: bool,
     switched: std::cell::Cell<bool>,
+}
+
+/// Windows Bluetooth HID paths carry the HID service UUID 0x1124.
+fn is_bluetooth(path: &CStr) -> bool {
+    path.to_string_lossy().to_ascii_lowercase().contains("{00001124-0000-1000-8000-00805f9b34fb}")
 }
 
 impl Pad {
     pub fn open(api: &HidApi, path: &CStr, model: Model) -> Result<Self> {
-        Ok(Self { dev: api.open_path(path)?, model, switched: std::cell::Cell::new(false) })
+        Ok(Self {
+            dev: api.open_path(path)?,
+            model,
+            bluetooth: is_bluetooth(path),
+            switched: std::cell::Cell::new(false),
+        })
     }
 
     /// Waits up to ~1 s for an input report that carries the battery.
@@ -113,12 +124,16 @@ impl Pad {
             if n == 0 {
                 continue;
             }
-            if let Some(b) = parse(self.model, &buf[..n]) {
-                return Ok(b);
+            // Over Bluetooth, 0x01 is the basic report (no battery, zero-padded).
+            let basic = self.bluetooth && buf[0] == 0x01;
+            if !basic {
+                if let Some(b) = parse(self.model, &buf[..n]) {
+                    return Ok(b);
+                }
             }
-            // A short report means Bluetooth basic mode: switch once, then keep reading.
+            // Basic mode: ask for full reports once, then keep reading.
             if !self.switched.replace(true) {
-                enable_full_reports(&self.dev, self.model);
+                enable_full_reports(&self.dev);
             }
         }
         Err(anyhow!("controller sent no battery report (is it switched on?)"))
@@ -163,6 +178,14 @@ mod tests {
         let b = parse(Model::DualShock4, &report(0x01, 64, 30, 0x1B)).unwrap();
         assert_eq!(b.state, ChargeState::Full);
         assert_eq!(parse(Model::DualShock4, &report(0x01, 64, 30, 0x0A)).unwrap().percent, 100);
+    }
+
+    #[test]
+    fn bluetooth_paths() {
+        let bt = cr"\\?\HID#{00001124-0000-1000-8000-00805f9b34fb}_VID&0002054c_PID&09cc#a&1&0000#{x}";
+        let usb = cr"\\?\HID#VID_054C&PID_09CC&MI_03#7&1&0&0000#{x}";
+        assert!(is_bluetooth(bt));
+        assert!(!is_bluetooth(usb));
     }
 
     #[test]

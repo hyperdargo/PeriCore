@@ -93,6 +93,18 @@ pub fn open_configurator() {
     let Some(dir) = install_dir() else { return };
     let exe = ["DeviceSelector.exe", "Configurator.exe"].iter().map(|n| dir.join(n)).find(|p| p.exists());
     if let Some(exe) = exe {
-        crate::os::open_url(&exe.display().to_string());
+        // Equalizer APO's Qt tools load `qt\platforms` relative to the working
+        // folder, so start them from the install folder (`start /D`), or they
+        // fail with "no Qt platform plugin could be initialized".
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("cmd")
+            .arg("/c")
+            .arg("start")
+            .arg("")
+            .arg("/D")
+            .arg(&dir)
+            .arg(&exe)
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn();
     }
 }

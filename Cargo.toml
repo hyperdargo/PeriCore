@@ -1,6 +1,6 @@
 [package]
 name = "pericore"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "PeriCore - one fast app for Ajazz mice, Fantech keyboards, PlayStation controllers and system-wide sound presets"
 repository = "https://github.com/hyperdargo/PeriCore"
@@ -30,6 +30,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_HiDpi",
     "Win32_System_Registry",
     "Win32_System_LibraryLoader",
+    "Win32_UI_Shell",
 ] }
 
 [build-dependencies]
