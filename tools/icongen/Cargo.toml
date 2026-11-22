@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# Stand-alone helper: renders assets/pericore.svg into .ico/.png.
+# Stand-alone helper: turns assets/pericore-source.webp into .ico/.png.
 [workspace]
 
 [dependencies]
-resvg = "0.44"
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }
 ico = "0.3"

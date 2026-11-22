@@ -5,8 +5,8 @@
 <h1 align="center">PeriCore</h1>
 
 <p align="center">
-  <b>One tiny, instant-start Windows app for your Ajazz mouse, Fantech keyboard and PlayStation controllers.</b><br>
-  Battery dashboard &middot; live battery % in the system tray &middot; device settings in one window &middot; written in Rust.
+  <b>One tiny, instant-start Windows app for your Ajazz mouse, Fantech keyboard, PlayStation controllers and headphones.</b><br>
+  Battery dashboard &middot; live battery % in the system tray &middot; device settings in one window &middot; sound presets and mic noise suppression &middot; written in Rust.
 </p>
 
 <p align="center">
@@ -44,6 +44,7 @@ PeriCore is a **single 5 MB `.exe`** that:
 - Hover for the name, level and estimated time left
 - Polls every 20 s (right-click → **Refresh battery** for an instant update)
 - Right-click → **Start with Windows** to launch the tray at login
+- Stays on the taskbar: Windows 11 puts new tray icons behind the **^** arrow, so PeriCore moves each of its icons out once. If you hide one again in Settings, that sticks.
 - Optional: right-click → **Show battery on taskbar** also draws the levels next to the tray arrow, using the Windows icon font
 
 ### Ajazz mouse (AJ159 APEX / AJ179 APEX and other RY-firmware mice)
@@ -74,6 +75,14 @@ The receiver doesn't report charging, so the charging state only shows for wired
 - DualShock 4, DualSense and DualSense Edge, over **USB or Bluetooth**
 - Battery level plus charging / full state, read straight from the controller (no other app needed)
 - Own tray icon, dashboard card and a live battery page
+
+### Sound (every app)
+- **Sound modes:** Flat, Music, Movies, Games, Vocal and Bass boost, plus a 10-band equalizer for your own curve. Headroom is added automatically so boosts don't clip.
+- **Headphone correction:** import the AutoEQ `ParametricEQ.txt` for your exact IEM or headphones (from [autoeq.app](https://autoeq.app)) so it sounds neutral before the sound mode is applied.
+- **Mic noise suppression:** removes keyboard, fan and background noise from your microphone in every app (Discord, games, calls), using the free [RNNoise plugin](https://github.com/werman/noise-suppression-for-voice).
+- Pick which output and which microphone it applies to.
+
+Windows only lets an app change other apps' sound through an audio add-on, so this uses the free [Equalizer APO](https://sourceforge.net/projects/equalizerapo/). Install it once, tick your headphones and microphone in its Device Selector, restart, then press **Connect** on PeriCore's Sound page (your previous Equalizer APO settings are backed up to `config-before-pericore.txt`). RNNoise needs the mic set to 48 kHz.
 
 ### Other devices
 PeriCore ships with a catalogue of **3,000+ devices** from the Rongyuan (RY) firmware family (Ajazz, Fantech, and many other brands), so other compatible mice and receivers are detected by name automatically.
@@ -130,7 +139,7 @@ cargo build --release      # -> target\release\PeriCore.exe
 .\build-release.ps1        # tests, app and installer -> dist\
 ```
 
-To regenerate the icon from `assets/pericore.svg`:
+To regenerate the icon files from the artwork in `assets/pericore-source.webp`:
 
 ```powershell
 cargo run --release --manifest-path tools/icongen/Cargo.toml
@@ -149,14 +158,15 @@ src/
     fantech/         Fantech MAXFIT61 protocol, keymap, per-key RGB
     playstation.rs   DualShock 4 / DualSense battery
   macros.rs          shared macro library and encoders
+  audio/             sound presets, AutoEQ import, Equalizer APO config, audio device list
   battery_log.rs     battery history used for time-left estimates
   install_layout.rs  install paths shared by the installer and --uninstall
   uninstall.rs       --uninstall
-  tray/              tray process, battery polling, icons, taskbar widget
-  ui/                egui window: dashboard, mouse, keyboard, controller pages
-assets/              icon (SVG/ICO/PNG) and device catalogue
+  tray/              tray process, battery polling, icons, taskbar widget, keep-on-taskbar
+  ui/                egui window: dashboard, mouse, keyboard, controller, sound pages
+assets/              icon (source artwork, ICO, PNG) and device catalogue
 docs/                reverse-engineered protocol notes
-tools/icongen/       SVG -> ICO/PNG renderer
+tools/icongen/       artwork -> ICO/PNG converter
 tools/installer/     PeriCore-Setup.exe (embeds the built PeriCore.exe)
 ```
 
@@ -166,4 +176,4 @@ Neither vendor publishes a protocol. The notes in [`docs/`](docs/) were worked o
 
 ## Disclaimer
 
-PeriCore is an independent project, not affiliated with or endorsed by Ajazz, Fantech or Sony. Changing device settings is at your own risk. If something looks wrong, the vendor app's reset still works.
+PeriCore is an independent project, not affiliated with or endorsed by Ajazz, Fantech, Sony or the Equalizer APO and RNNoise projects. Changing device settings is at your own risk. If something looks wrong, the vendor app's reset still works.

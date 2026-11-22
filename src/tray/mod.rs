@@ -3,6 +3,7 @@
 pub mod estimate;
 pub mod icon;
 pub mod monitor;
+mod promote;
 pub mod widget;
 
 use crate::os;
@@ -151,6 +152,8 @@ pub fn run() -> Result<()> {
     let (mut phase, mut next_frame) = (0u8, Instant::now());
     let mut widget = if taskbar_enabled() { widget::Widget::new().ok() } else { None };
     let mut next_place = Instant::now();
+    // Explorer adds a settings entry for each new icon shortly after it appears.
+    let mut next_promote = Instant::now() + Duration::from_secs(2);
     loop {
         os::pump_messages(200);
 
@@ -205,6 +208,10 @@ pub fn run() -> Result<()> {
                 next_place = Instant::now() + Duration::from_secs(1);
                 w.redraw();
             }
+        }
+        if Instant::now() >= next_promote {
+            next_promote = Instant::now() + Duration::from_secs(10);
+            promote::promote();
         }
         if Instant::now() >= next_frame {
             next_frame = Instant::now() + ANIM_STEP;

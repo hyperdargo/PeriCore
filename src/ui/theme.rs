@@ -76,7 +76,7 @@ pub fn card<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -
 /// Horizontal tab strip; returns true when the selection changed.
 pub fn tabs<T: PartialEq + Copy>(ui: &mut egui::Ui, current: &mut T, items: &[(T, &str)]) -> bool {
     let before = *current;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for &(value, label) in items {
             let on = *current == value;
             let text = RichText::new(label).size(15.0).color(if on { TEXT } else { MUTED });

@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
+mod audio;
 mod battery_log;
 mod devices;
 mod hid;

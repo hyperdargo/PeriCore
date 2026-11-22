@@ -180,10 +180,20 @@ pub fn local_time() -> (u16, u8, u8, u8, u8, u8) {
 
 /// Native "Open" dialog for images; None if cancelled.
 pub fn pick_image_file() -> Option<PathBuf> {
+    pick_file("Images (*.gif;*.png;*.jpg;*.jpeg)\0*.gif;*.png;*.jpg;*.jpeg\0All files\0*.*\0")
+}
+
+/// Opens a web page in the default browser.
+pub fn open_url(url: &str) {
+    let _ = Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).creation_flags(CREATE_NO_WINDOW).spawn();
+}
+
+/// Native "Open" dialog; `filter` is a Win32 filter string ("Name\0*.ext\0...").
+pub fn pick_file(filter: &str) -> Option<PathBuf> {
     use windows_sys::Win32::UI::Controls::Dialogs::{
         GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
     };
-    let filter = wide("Images (*.gif;*.png;*.jpg;*.jpeg)\0*.gif;*.png;*.jpg;*.jpeg\0All files\0*.*\0");
+    let filter = wide(filter);
     let mut buf = vec![0u16; 1024];
     // SAFETY: zeroed is a valid OPENFILENAMEW; required fields are set below.
     let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };

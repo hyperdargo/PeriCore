@@ -10,6 +10,7 @@ mod keyboard;
 mod macro_editor;
 mod mouse;
 mod mouse_buttons;
+mod sound;
 mod theme;
 
 use crate::devices::{self, fantech::Maxfit61, ry::RyDevice, Detected, Family};
@@ -22,6 +23,7 @@ enum Panel {
     Mouse(Box<mouse::MousePanel>),
     Keyboard(Box<keyboard::KeyboardPanel>),
     Controller(Box<controller::ControllerPanel>),
+    Sound(Box<sound::SoundPanel>),
     Error(String),
 }
 
@@ -45,7 +47,7 @@ impl App {
         let _ = self.api.refresh_devices();
         self.devices = devices::discover(&self.api);
         self.selected = self.selected.min(self.devices.len().saturating_sub(1));
-        if !self.home {
+        if !self.home && !matches!(self.panel, Some(Panel::Sound(_))) {
             self.open_selected();
         }
     }
@@ -106,12 +108,17 @@ impl App {
         if nav_item(ui, "🏠  Dashboard", self.home) {
             self.go_home();
         }
+        let on_sound = matches!(self.panel, Some(Panel::Sound(_)));
+        if nav_item(ui, "🎧  Sound", on_sound) && !on_sound {
+            self.home = false;
+            self.panel = Some(Panel::Sound(Box::new(sound::SoundPanel::new())));
+        }
         ui.add_space(12.0);
         ui.label(egui::RichText::new("DEVICES").size(11.5).color(theme::MUTED));
         ui.add_space(4.0);
         let mut clicked = None;
         for (i, d) in self.devices.iter().enumerate() {
-            if device_card(ui, d, !self.home && i == self.selected) {
+            if device_card(ui, d, !self.home && !on_sound && i == self.selected) {
                 clicked = Some(i);
             }
         }
@@ -208,6 +215,7 @@ impl eframe::App for App {
                 Some(Panel::Mouse(p)) => p.show(ui),
                 Some(Panel::Keyboard(p)) => p.show(ui),
                 Some(Panel::Controller(p)) => p.show(ui),
+                Some(Panel::Sound(p)) => p.show(ui),
                 Some(Panel::Error(e)) => {
                     theme::card(ui, "Can't open this device", |ui| ui.colored_label(theme::BAD, e.as_str()));
                 }

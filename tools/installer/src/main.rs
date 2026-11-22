@@ -60,7 +60,7 @@ impl Setup {
         };
         ui.label(RichText::new(title).size(18.0).strong().color(TEXT));
         ui.add_space(4.0);
-        ui.label(RichText::new("Battery dashboard and settings for your Ajazz mouse, Fantech keyboard and PlayStation controllers.").color(MUTED));
+        ui.label(RichText::new("Battery dashboard, device settings and sound presets for your mouse, keyboard, controllers and headphones.").color(MUTED));
         ui.add_space(14.0);
         card(ui, |ui| {
             ui.label(RichText::new("Install location").color(MUTED).size(12.0));

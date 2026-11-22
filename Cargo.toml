@@ -1,8 +1,8 @@
 [package]
 name = "pericore"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
-description = "PeriCore - one fast app for Ajazz mice and Fantech keyboards: settings + tray battery indicator"
+description = "PeriCore - one fast app for Ajazz mice, Fantech keyboards, PlayStation controllers and system-wide sound presets"
 repository = "https://github.com/hyperdargo/PeriCore"
 
 [[bin]]
@@ -17,6 +17,7 @@ image = { version = "0.25", default-features = false, features = ["gif", "png", 
 hidapi = { version = "2.6", default-features = false, features = ["windows-native"] }
 eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts"] }
 tray-icon = "0.19"
+winreg = "0.52"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
