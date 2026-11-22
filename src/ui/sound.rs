@@ -15,6 +15,8 @@ pub struct SoundPanel {
     outputs: Vec<Device>,
     mics: Vec<Device>,
     status: eapo::Status,
+    /// Endpoint ids with Equalizer APO turned on (outputs, then mics).
+    active: (Vec<String>, Vec<String>),
     dirty: bool,
     msg: Option<Result<String, String>>,
 }
@@ -26,15 +28,44 @@ impl SoundPanel {
             outputs: devices::list(false),
             mics: devices::list(true),
             status: eapo::status(),
+            active: (Vec::new(), Vec::new()),
             dirty: false,
             msg: None,
         }
+        .with_active()
+    }
+
+    fn with_active(mut self) -> Self {
+        self.load_active();
+        self
+    }
+
+    fn load_active(&mut self) {
+        let on = |list: &[Device], capture| list.iter().filter(|d| devices::has_eapo(capture, &d.id)).map(|d| d.id.clone()).collect();
+        self.active = (on(&self.outputs, false), on(&self.mics, true));
+    }
+
+    /// Warns when Equalizer APO isn't turned on for a chosen device.
+    fn inactive_warning(&self, ui: &mut egui::Ui, missing: &[&Device]) {
+        if self.status != eapo::Status::Ready || missing.is_empty() {
+            return;
+        }
+        let names: Vec<&str> = missing.iter().map(|d| d.name.as_str()).collect();
+        ui.add_space(4.0);
+        ui.colored_label(
+            theme::WARN,
+            format!(
+                "⚠  Equalizer APO isn't turned on for {}, so nothing changes yet. Click \"Choose devices…\" above, tick it, press OK, then restart Windows.",
+                names.join(", ")
+            ),
+        );
     }
 
     fn refresh(&mut self) {
         self.outputs = devices::list(false);
         self.mics = devices::list(true);
         self.status = eapo::status();
+        self.load_active();
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -118,6 +149,14 @@ impl SoundPanel {
                 ui.add_space(12.0);
                 self.output_combo(ui);
             });
+            if self.s.enabled {
+                // With "all outputs", at least one must have Equalizer APO.
+                let chosen: Vec<&Device> = if self.s.outputs.is_empty() { self.outputs.iter().collect() } else { self.s.outputs.iter().collect() };
+                let missing: Vec<&Device> = chosen.iter().copied().filter(|d| !self.active.0.contains(&d.id)).collect();
+                let none_active = missing.len() == chosen.len();
+                let shown: Vec<&Device> = if self.s.outputs.is_empty() && !none_active { Vec::new() } else { missing };
+                self.inactive_warning(ui, &shown);
+            }
             ui.add_space(6.0);
             let items: Vec<(Preset, &str)> = Preset::ALL.iter().map(|&p| (p, p.name())).collect();
             if theme::tabs(ui, &mut self.s.preset, &items) {
@@ -228,6 +267,11 @@ impl SoundPanel {
                     }
                 }
             });
+            if let (true, Some(d)) = (self.s.mic.enabled, &self.s.mic.device) {
+                if !self.active.1.contains(&d.id) {
+                    self.inactive_warning(ui, &[d]);
+                }
+            }
             ui.label(RichText::new("RNNoise needs the mic at 48 kHz: Sound settings > your mic > Properties > Advanced. The mic must also be ticked in Equalizer APO's Device Selector.").size(12.0).color(theme::MUTED));
         });
     }

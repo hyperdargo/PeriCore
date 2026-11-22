@@ -88,8 +88,11 @@ pub fn apply(text: &str) -> Result<()> {
 }
 
 /// Opens Equalizer APO's Device Selector (it asks for admin rights itself).
+/// Version 1.4 calls it DeviceSelector.exe; older versions Configurator.exe.
 pub fn open_configurator() {
-    if let Some(dir) = install_dir() {
-        crate::os::open_url(&dir.join("Configurator.exe").display().to_string());
+    let Some(dir) = install_dir() else { return };
+    let exe = ["DeviceSelector.exe", "Configurator.exe"].iter().map(|n| dir.join(n)).find(|p| p.exists());
+    if let Some(exe) = exe {
+        crate::os::open_url(&exe.display().to_string());
     }
 }
