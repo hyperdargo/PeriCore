@@ -1,3 +1,5 @@
 /target
 /tools/icongen/target
 *.pdb
+dist/
+tools/installer/target/

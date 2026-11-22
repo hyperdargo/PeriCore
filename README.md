@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><b>⬇ Download PeriCore.exe</b></a>
+  <a href="../../releases/latest"><b>⬇ Download PeriCore Setup</b></a>
 </p>
 
 ---
@@ -51,8 +51,8 @@ PeriCore is a **single 5 MB `.exe`** that:
 |---|:-:|:-:|
 | Battery level | ✅ | ✅ |
 | DPI stages (1–8), per-stage colours, active stage | ✅ verified | ⚠️ untested |
-| Polling rate 125 – 8000 Hz | ✅ | ⚠️ untested |
-| Debounce, lift-off distance, ripple correction, angle snapping, double-click guard, sleep timer | ✅ | ⚠️ untested |
+| Polling rate 125 – 8000 Hz | ✅ verified | ⚠️ untested |
+| Debounce, lift-off distance, ripple correction, angle snapping, double-click guard, sleep timer | ✅ verified | ⚠️ untested |
 | Button remapping (mouse, keyboard keys and shortcuts, media, DPI, rapid fire, macros) | ✅ verified | ⚠️ untested |
 | On-board macros (record or build, repeat / toggle / while held) | ✅ | ⚠️ untested |
 | Dock screen: upload a picture or animated GIF (up to 222 frames), clock sync | ✅ verified | – |
@@ -80,13 +80,16 @@ PeriCore ships with a catalogue of **3,000+ devices** from the Rongyuan (RY) fir
 
 ## Install
 
-1. Download **`PeriCore.exe`** from the [latest release](../../releases/latest). There's no installer.
-2. Put it somewhere permanent (e.g. `C:\Program Files\PeriCore\`) and run it.
+1. Download **`PeriCore-Setup-x.y.z.exe`** from the [latest release](../../releases/latest) and run it.
+2. Pick your options (desktop shortcut, start with Windows, open when done) and click **Install**. It installs just for you into `%LOCALAPPDATA%\Programs\PeriCore`, so no administrator rights are needed. Running a newer setup later updates PeriCore in place.
 3. **Close the AJAZZ / FANTECH apps** so they don't send conflicting commands to the devices.
 4. Windows 11 hides new tray icons: click the **^** arrow next to the clock and drag the PeriCore icon onto the taskbar to keep the battery % visible.
-5. Optional: right-click the tray icon → **Start with Windows**.
 
-> Windows SmartScreen may warn about an unsigned app the first time. Click **More info → Run anyway**.
+To remove it: **Settings → Apps → Installed apps → PeriCore → Uninstall**. Shortcuts, auto-start and the program folder are removed; your settings in `%APPDATA%\PeriCore` are kept.
+
+Prefer no installer? Each release also has a portable **`PeriCore.exe`**: put it in a permanent folder, run it, and use the tray menu's **Start with Windows**.
+
+> Windows SmartScreen may warn about an unsigned app the first time. Click **More info → Run anyway**. For a silent install, run `PeriCore-Setup-x.y.z.exe /S`.
 
 ## Usage
 
@@ -97,6 +100,7 @@ PeriCore ships with a catalogue of **3,000+ devices** from the Rongyuan (RY) fir
 | `PeriCore.exe --probe` | Prints detected devices and read-only diagnostics |
 | `PeriCore.exe --listen 3151 5007 10` | Passively prints a device's vendor input reports for 10 s |
 | `PeriCore.exe --dock-upload picture.gif` | Uploads a picture to the dock screen from the command line |
+| `PeriCore.exe --uninstall` | Removes an installed PeriCore (what *Uninstall* in Windows runs) |
 
 From PowerShell, run a quoted path with `&`:
 
@@ -123,6 +127,7 @@ git clone https://github.com/hyperdargo/PeriCore
 cd PeriCore
 cargo test
 cargo build --release      # -> target\release\PeriCore.exe
+.\build-release.ps1        # tests, app and installer -> dist\
 ```
 
 To regenerate the icon from `assets/pericore.svg`:
@@ -145,11 +150,14 @@ src/
     playstation.rs   DualShock 4 / DualSense battery
   macros.rs          shared macro library and encoders
   battery_log.rs     battery history used for time-left estimates
+  install_layout.rs  install paths shared by the installer and --uninstall
+  uninstall.rs       --uninstall
   tray/              tray process, battery polling, icons, taskbar widget
   ui/                egui window: dashboard, mouse, keyboard, controller pages
 assets/              icon (SVG/ICO/PNG) and device catalogue
 docs/                reverse-engineered protocol notes
 tools/icongen/       SVG -> ICO/PNG renderer
+tools/installer/     PeriCore-Setup.exe (embeds the built PeriCore.exe)
 ```
 
 ## How it works

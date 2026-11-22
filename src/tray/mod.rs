@@ -120,13 +120,28 @@ impl Icons {
     }
 }
 
+/// Calls `f` once a second until it succeeds or `tries` run out.
+fn retry<T>(tries: u32, mut f: impl FnMut() -> Result<T>) -> Result<T> {
+    let mut last = None;
+    for _ in 0..tries {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) => last = Some(e),
+        }
+        os::pump_messages(1000);
+    }
+    Err(last.unwrap_or_else(|| anyhow::anyhow!("no attempts made")))
+}
+
 pub fn run() -> Result<()> {
     let Some(_guard) = os::SingleInstance::acquire("PeriCore.Tray") else {
         return Ok(());
     };
     let (menu, items) = build_menu()?;
     let mut icons = Icons { menu, shown: Vec::new() };
-    icons.shown.push((String::new(), icons.new_icon(IconState::default(), "PeriCore - reading battery...")?));
+    // At login Explorer may not be ready yet: keep retrying for a minute.
+    let first = retry(60, || icons.new_icon(IconState::default(), "PeriCore - reading battery..."))?;
+    icons.shown.push((String::new(), first));
 
     let (tx, rx) = mpsc::channel::<Vec<Reading>>();
     let (wake_tx, wake_rx) = mpsc::channel::<()>();
@@ -172,7 +187,9 @@ pub fn run() -> Result<()> {
         while let Ok(readings) = rx.try_recv() {
             if !synced || readings != last {
                 synced = true;
-                icons.sync(&readings, phase)?;
+                if let Err(e) = icons.sync(&readings, phase) {
+                    os::log_error(&format!("tray update: {e:#}"));
+                }
                 if let Some(w) = &mut widget {
                     w.update(&readings);
                 }
@@ -193,7 +210,9 @@ pub fn run() -> Result<()> {
             next_frame = Instant::now() + ANIM_STEP;
             if last.iter().any(|r| r.charging() && !r.full()) {
                 phase = (phase + 1) % icon::CHARGE_PHASES;
-                icons.animate(&last, phase)?;
+                if let Err(e) = icons.animate(&last, phase) {
+                    os::log_error(&format!("tray animation: {e:#}"));
+                }
             }
         }
     }

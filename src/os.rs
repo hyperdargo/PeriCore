@@ -230,3 +230,23 @@ pub fn close_vendor_apps() {
         }
     }
 }
+
+/// Appends a line to %APPDATA%\PeriCore\pericore.log (kept under 256 KB).
+pub fn log_error(msg: &str) {
+    use std::io::Write;
+    let Some(dir) = std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("PeriCore")) else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("pericore.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 256 * 1024) {
+        let _ = std::fs::remove_file(&path);
+    }
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "[{secs}] v{} {msg}", env!("CARGO_PKG_VERSION"));
+    }
+}
+
+/// Logs panics (the release build aborts on panic, so this is the only trace).
+pub fn install_panic_log() {
+    std::panic::set_hook(Box::new(|info| log_error(&format!("panic: {info}"))));
+}

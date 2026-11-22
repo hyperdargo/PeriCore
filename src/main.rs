@@ -3,12 +3,14 @@
 mod battery_log;
 mod devices;
 mod hid;
+mod install_layout;
 mod os;
 mod probe;
 mod macros;
 mod store;
 mod tray;
 mod ui;
+mod uninstall;
 
 /// Modes:
 ///   (none)    open settings window (also starts the tray)
@@ -16,8 +18,17 @@ mod ui;
 ///   --ui      settings window
 ///   --probe   print detected devices and read-only diagnostics
 fn main() -> anyhow::Result<()> {
+    os::install_panic_log();
     let arg = std::env::args().nth(1).unwrap_or_default();
-    match arg.as_str() {
+    let result = run_mode(&arg);
+    if let Err(e) = &result {
+        os::log_error(&format!("{arg}: {e:#}"));
+    }
+    result
+}
+
+fn run_mode(arg: &str) -> anyhow::Result<()> {
+    match arg {
         "--probe" => {
             attach_console();
             probe::run()
@@ -30,6 +41,7 @@ fn main() -> anyhow::Result<()> {
             probe::listen(hex(a.first(), 0x3151), hex(a.get(1), 0x5007), secs)
         }
         "--tray" => tray::run(),
+        "--uninstall" => uninstall::run(std::env::args().any(|a| a == "--quiet")),
         "--dock-upload" => {
             attach_console();
             probe::dock_upload(std::env::args().nth(2).unwrap_or_default().into())
