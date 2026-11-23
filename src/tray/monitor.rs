@@ -46,8 +46,7 @@ pub const POLL_EVERY: Duration = Duration::from_secs(20);
 
 /// Reads battery for every wireless-capable device currently plugged in.
 pub fn snapshot(api: &mut HidApi) -> Vec<Reading> {
-    let _ = api.refresh_devices();
-    devices::discover(api)
+    devices::discover()
         .into_iter()
         .filter_map(|d| {
             let (name, battery, asleep) = match d.family {
@@ -91,7 +90,7 @@ pub fn estimate(readings: &mut [Reading], log: &mut Log, t: u64) {
 
 /// Polls forever; a message on `wake` triggers an immediate refresh.
 pub fn run(tx: Sender<Vec<Reading>>, wake: Receiver<()>) {
-    let Ok(mut api) = HidApi::new() else { return };
+    let Ok(mut api) = crate::devices::hid_api() else { return };
     let mut log = Log::load();
     loop {
         // Skip while the settings window is uploading to the dock screen.

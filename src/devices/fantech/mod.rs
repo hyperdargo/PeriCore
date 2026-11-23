@@ -6,19 +6,17 @@ pub mod protocol;
 
 use super::Detected;
 use anyhow::{anyhow, Result};
-use hidapi::{DeviceInfo, HidApi, HidDevice};
+use hidapi::{HidApi, HidDevice};
 use protocol::{KbLighting, LightCaps, LEN};
 use std::time::{Duration, Instant};
 
 pub const NAME: &str = "Fantech MAXFIT61";
-const VID: u16 = 0x0416;
+pub const VID: u16 = 0x0416;
 const PID: u16 = 0xC345;
 
 /// The vendor app accepts the interface whose path contains `mi_02`.
-pub fn matches(d: &DeviceInfo) -> bool {
-    d.vendor_id() == VID
-        && d.product_id() == PID
-        && (d.interface_number() == 2 || d.path().to_string_lossy().to_ascii_lowercase().contains("mi_02"))
+pub fn matches(d: &super::hidlist::HidInfo) -> bool {
+    d.vid == VID && d.pid == PID && (d.interface == 2 || d.path.to_string_lossy().to_ascii_lowercase().contains("mi_02"))
 }
 
 pub struct Maxfit61 {

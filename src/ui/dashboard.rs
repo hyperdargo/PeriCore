@@ -8,7 +8,6 @@ use crate::devices::ry::protocol::ChargeState;
 use crate::tray::estimate;
 use crate::tray::monitor::{self, Reading};
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Rounding, Shape, Stroke, Vec2};
-use hidapi::HidApi;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
@@ -109,7 +108,7 @@ impl Dashboard {
 }
 
 fn poll(tx: Sender<(Vec<Reading>, Log)>, wake: Receiver<()>, active: Arc<AtomicBool>) {
-    let Ok(mut api) = HidApi::new() else { return };
+    let Ok(mut api) = crate::devices::hid_api() else { return };
     loop {
         if active.load(Ordering::Relaxed) && !crate::os::screen_busy() {
             let mut readings = monitor::snapshot(&mut api);

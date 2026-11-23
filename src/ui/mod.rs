@@ -39,13 +39,12 @@ struct App {
 
 impl App {
     fn new(api: HidApi) -> Self {
-        let devices = devices::discover(&api);
+        let devices = devices::discover();
         Self { api, devices, selected: 0, panel: None, home: true, dashboard: dashboard::Dashboard::new() }
     }
 
     fn rescan(&mut self) {
-        let _ = self.api.refresh_devices();
-        self.devices = devices::discover(&self.api);
+        self.devices = devices::discover();
         self.selected = self.selected.min(self.devices.len().saturating_sub(1));
         if !self.home && !matches!(self.panel, Some(Panel::Sound(_))) {
             self.open_selected();
@@ -238,7 +237,7 @@ pub fn run() -> Result<()> {
         return Ok(());
     };
     os::ensure_tray_running();
-    let api = HidApi::new()?;
+    let api = crate::devices::hid_api()?;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(os::WINDOW_TITLE)

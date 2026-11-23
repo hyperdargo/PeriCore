@@ -2,6 +2,7 @@
 
 pub mod db;
 pub mod fantech;
+pub mod hidlist;
 pub mod playstation;
 pub mod ry;
 
@@ -38,22 +39,41 @@ pub struct Detected {
     pub name: String,
 }
 
-/// Lists every supported device's configuration interface.
-pub fn discover(api: &HidApi) -> Vec<Detected> {
+/// A hidapi handle for opening devices by path. Its own device listing is
+/// turned off: `discover` lists devices instead (see `hidlist`).
+pub fn hid_api() -> hidapi::HidResult<HidApi> {
+    HidApi::disable_device_discovery();
+    HidApi::new()
+}
+
+/// Vendor ids PeriCore supports (catalogue, Sony, Fantech).
+fn supported_vids() -> &'static [u16] {
+    static VIDS: std::sync::OnceLock<Vec<u16>> = std::sync::OnceLock::new();
+    VIDS.get_or_init(|| {
+        let mut v: Vec<u16> = db::all().iter().map(|e| e.vid).collect();
+        v.extend([playstation::SONY_VID, fantech::VID]);
+        v.sort_unstable();
+        v.dedup();
+        v
+    })
+}
+
+/// Lists every supported device's configuration interface. Uses our own
+/// listing (see `hidlist`), so slow unrelated devices can't stall it.
+pub fn discover() -> Vec<Detected> {
     let mut found: Vec<Detected> = Vec::new();
-    for d in api.device_list() {
-        let (vid, pid) = (d.vendor_id(), d.product_id());
-        let hit = if playstation::matches(vid, pid, d.usage_page(), d.usage()) {
+    for d in hidlist::list(supported_vids()) {
+        let (vid, pid) = (d.vid, d.pid);
+        let hit = if playstation::matches(vid, pid, d.usage_page, d.usage) {
             playstation::lookup(vid, pid).map(|(_, name)| (Family::PlayStation, Kind::Controller, name.to_string()))
-        } else if fantech::matches(d) {
+        } else if fantech::matches(&d) {
             Some((Family::FantechMaxfit61, Kind::Keyboard, fantech::NAME.to_string()))
         } else {
-            ry_match(vid, pid, d.usage_page(), d.usage())
+            ry_match(vid, pid, d.usage_page, d.usage)
         };
         if let Some((family, kind, name)) = hit {
-            let path = d.path().to_owned();
-            if !found.iter().any(|f| f.path == path) {
-                found.push(Detected { path, vid, pid, family, kind, name });
+            if !found.iter().any(|f| f.path == d.path) {
+                found.push(Detected { path: d.path, vid, pid, family, kind, name });
             }
         }
     }

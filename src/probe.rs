@@ -9,8 +9,8 @@ fn hex(b: &[u8]) -> String {
 }
 
 pub fn run() -> Result<()> {
-    let api = HidApi::new()?;
-    let found = devices::discover(&api);
+    let api = crate::devices::hid_api()?;
+    let found = devices::discover();
     println!("{} supported interface(s)", found.len());
     for d in &found {
         println!("\n== {} [{:?} {:?}] {:04X}:{:04X}\n   {}", d.name, d.family, d.kind, d.vid, d.pid, d.path.to_string_lossy());
@@ -33,13 +33,13 @@ pub fn run() -> Result<()> {
 /// `--listen VID PID SECS`: prints input reports from every vendor-page
 /// interface of a device. Passive: nothing is sent.
 pub fn listen(vid: u16, pid: u16, secs: u64) -> Result<()> {
-    let api = HidApi::new()?;
-    let devs: Vec<_> = api
-        .device_list()
-        .filter(|d| d.vendor_id() == vid && d.product_id() == pid && d.usage_page() >= 0xFF00)
+    let api = crate::devices::hid_api()?;
+    let devs: Vec<_> = devices::hidlist::list(&[vid])
+        .into_iter()
+        .filter(|d| d.pid == pid && d.usage_page >= 0xFF00)
         .filter_map(|d| {
-            let label = format!("if{} page {:04X} usage {:02X}", d.interface_number(), d.usage_page(), d.usage());
-            api.open_path(d.path()).ok().map(|h| (label, h))
+            let label = format!("if{} page {:04X} usage {:02X}", d.interface, d.usage_page, d.usage);
+            api.open_path(&d.path).ok().map(|h| (label, h))
         })
         .collect();
     println!("listening on {} interface(s) for {secs}s", devs.len());
@@ -126,8 +126,8 @@ fn probe_fantech(api: &HidApi, d: &devices::Detected) {
 pub fn dock_upload(path: std::path::PathBuf) -> Result<()> {
     use crate::devices::ry::screen::{self, ScreenLink};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    let api = HidApi::new()?;
-    let d = devices::discover(&api)
+    let api = crate::devices::hid_api()?;
+    let d = devices::discover()
         .into_iter()
         .find(|d| d.kind == devices::Kind::Receiver)
         .ok_or_else(|| anyhow::anyhow!("no receiver found"))?;
